@@ -24,6 +24,7 @@ uvtmp/
 
 # Data & configuration
 .env
+.env.*
 reader_data.db
 test.db
 
