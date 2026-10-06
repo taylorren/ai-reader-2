@@ -221,3 +221,31 @@ class Database:
             conn.commit()
         finally:
             conn.close()
+
+    def save_progress(self, book_id: str, chapter_index: int,
+                      scroll_percent: float = 0.0, anchor: str | None = None,
+                      chapter_path: str | None = None) -> None:
+        """Save or update the reading position: chapter plus percent within it.
+
+        `is_completed` is deliberately untouched — finishing a book and
+        being partway through it are independent facts.
+        """
+        now = datetime.now().isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("""
+                INSERT INTO reading_progress (book_id, chapter_index, chapter_path,
+                                              scroll_percent, anchor, is_completed,
+                                              last_read_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?)
+                ON CONFLICT(book_id) DO UPDATE SET
+                    chapter_index = excluded.chapter_index,
+                    chapter_path = excluded.chapter_path,
+                    scroll_percent = excluded.scroll_percent,
+                    anchor = excluded.anchor,
+                    last_read_at = excluded.last_read_at
+            """, (book_id, chapter_index, chapter_path, scroll_percent,
+                  anchor, now))
+            conn.commit()
+        finally:
+            conn.close()

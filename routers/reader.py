@@ -102,6 +102,11 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
     if not 0 <= chapter_index < book.chapter_count:
         raise HTTPException(status_code=404, detail="No such chapter")
 
+    progress = get_db().get_progress(slug)
+    saved_percent = 0.0
+    if progress and progress["chapter_index"] == chapter_index:
+        saved_percent = progress["scroll_percent"] or 0.0
+
     return templates.TemplateResponse(
         request=request,
         name="reader.html",
@@ -122,6 +127,7 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
                 "index": chapter_index,
                 "spine": list(book.spine),
                 "toc": book.toc_json(),
+                "saved_percent": saved_percent,
             },
         },
     )

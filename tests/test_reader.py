@@ -142,6 +142,39 @@ def test_the_shell_carries_the_footnote_popup(isolated_client, isolated):
     assert 'id="footnote-popup"' in body
 
 
+def test_progress_is_saved_and_restored(isolated_client, isolated, db):
+    slug = upload(isolated_client, isolated)
+    response = isolated_client.post(
+        "/api/progress",
+        json={"book_id": slug, "chapter_index": 1, "scroll_percent": 42.0},
+    )
+    assert response.status_code == 200
+    progress = db.get_progress(slug)
+    assert progress["chapter_index"] == 1
+    assert progress["scroll_percent"] == 42.0
+
+    # The resume link and the shell both honour it.
+    redirect = isolated_client.get(f"/read/{slug}", follow_redirects=False)
+    assert unquote(redirect.headers["location"]) == f"/read/{slug}/1"
+    body = isolated_client.get(f"/read/{slug}/1").text
+    assert '"saved_percent": 42' in body or '"saved_percent":42' in body
+
+
+def test_progress_rejects_a_bad_chapter_and_unknown_book(
+        isolated_client, isolated):
+    slug = upload(isolated_client, isolated)
+    bad_chapter = isolated_client.post(
+        "/api/progress",
+        json={"book_id": slug, "chapter_index": 99, "scroll_percent": 5},
+    )
+    assert bad_chapter.status_code == 400
+    unknown = isolated_client.post(
+        "/api/progress",
+        json={"book_id": "ghost", "chapter_index": 0, "scroll_percent": 5},
+    )
+    assert unknown.status_code == 404
+
+
 def test_an_unsupported_book_gets_a_named_shell(isolated_client, isolated):
     slug = upload(isolated_client, isolated, write_drm_epub, "locked.epub")
     response = isolated_client.get(f"/read/{slug}/0")

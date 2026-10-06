@@ -41,6 +41,8 @@ function load(index, anchor) {
     index = Math.max(0, Math.min(BOOK.spine.length - 1, index));
     BOOK.index = index;
     frame.src = fileURL(BOOK.spine[index], anchor);
+    if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+    saveProgress(0);
     mark();
 }
 
@@ -223,6 +225,77 @@ const navs = [
     wireNav("bottom-prev", "bottom-next", "bottom-position"),
 ];
 
+/* ---- Progress: where you were is where you return ----
+
+The chapter lives in the URL (refresh-safe); the position within the
+chapter is a scroll percent — restored on boot and on in-session returns,
+saved on chapter change and debounced while scrolling. The database row
+carries it; the database is never disturbed by a failed save. */
+
+let pendingRestore = {
+    chapter: BOOK.index,
+    percent: Number(BOOK.saved_percent || 0),
+};
+const lastPercentByChapter = new Map();
+let scrollSaveTimer = null;
+
+function frameScrollPercent() {
+    try {
+        const win = frame.contentWindow;
+        const scrollable = win.document.documentElement;
+        const max = scrollable.scrollHeight - win.innerHeight;
+        if (max <= 0) return 0;
+        return Math.max(0, Math.min(100, (100 * win.scrollY) / max));
+    } catch {
+        return 0; // opaque origin: nothing measurable
+    }
+}
+
+function saveProgress(percent) {
+    lastPercentByChapter.set(BOOK.index, percent);
+    fetch("/api/progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            book_id: BOOK.slug,
+            chapter_index: BOOK.index,
+            scroll_percent: Math.round(percent),
+        }),
+    }).catch(() => {}); // a failed save must never disturb the reading
+}
+
+function scheduleProgressSave() {
+    if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+    scrollSaveTimer = setTimeout(() => saveProgress(frameScrollPercent()), 500);
+}
+
+function restoreScroll(chapter) {
+    let percent = null;
+    if (pendingRestore && pendingRestore.chapter === chapter) {
+        percent = pendingRestore.percent;
+        pendingRestore = null;
+    } else if (lastPercentByChapter.has(chapter)) {
+        percent = lastPercentByChapter.get(chapter);
+    }
+    if (!(percent > 0)) return;
+    // Layout settles as images load; restore now and once more shortly.
+    const scrollToPercent = () => {
+        try {
+            const win = frame.contentWindow;
+            const max = win.document.documentElement.scrollHeight - win.innerHeight;
+            if (max > 0) win.scrollTo(0, Math.round((percent / 100) * max));
+        } catch { /* opaque origin */ }
+    };
+    scrollToPercent();
+    setTimeout(scrollToPercent, 350);
+}
+
+function wireFrameScroll() {
+    try {
+        frame.contentWindow.addEventListener("scroll", scheduleProgressSave, { passive: true });
+    } catch { /* opaque origin */ }
+}
+
 document.getElementById("font-minus").addEventListener("click", () => {
     state.size = clampSize(state.size - 1);
     localStorage.setItem("reader-font-size", String(state.size));
@@ -401,6 +474,8 @@ function hidePopup() {
 frame.addEventListener("load", () => {
     hidePopup();
     applyFrameStyle();
+    wireFrameScroll();
+    restoreScroll(BOOK.index);
     try {
         const frameLocation = frame.contentWindow.location;
         if (!frameLocation.pathname.startsWith(prefix)) return;
@@ -422,3 +497,10 @@ applySidebar();
 applyTheme();
 applyMode();
 mark();
+// The initial chapter's frame may already have fired `load` before these
+// listeners attached (fast local serving, cache) — wire now as well; the
+// dataset guards make repeated wiring harmless. The delayed re-wire
+// catches any load that completed in between.
+wireMarkers();
+loadEdges();
+setTimeout(wireMarkers, 300);
