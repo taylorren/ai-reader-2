@@ -115,6 +115,33 @@ def test_the_book_api_for_an_unknown_slug_is_a_404(isolated_client):
     assert isolated_client.get("/api/book/ghost").status_code == 404
 
 
+def test_the_footnote_api_returns_the_resolved_edges(isolated_client, isolated):
+    slug = upload(isolated_client, isolated)
+    payload = isolated_client.get(f"/api/footnotes/{slug}/0").json()
+    edges = payload["edges"]
+    assert [e["href"] for e in edges] == [
+        "#local-note", "ch2.xhtml#endnote-1", "ch2.xhtml#no-such-note",
+    ]
+    assert edges[0]["resolved"] is True
+    assert edges[0]["target_chapter"] == 0
+    assert edges[0]["target_text"] == "The local note."
+    assert edges[1]["target_chapter"] == 1
+    assert edges[1]["target_anchor"] == "endnote-1"
+    assert edges[2]["resolved"] is False
+
+
+def test_the_footnote_api_for_a_bad_chapter_is_a_404(isolated_client, isolated):
+    slug = upload(isolated_client, isolated)
+    assert isolated_client.get(f"/api/footnotes/{slug}/7").status_code == 404
+    assert isolated_client.get("/api/footnotes/ghost/0").status_code == 404
+
+
+def test_the_shell_carries_the_footnote_popup(isolated_client, isolated):
+    slug = upload(isolated_client, isolated)
+    body = isolated_client.get(f"/read/{slug}/0").text
+    assert 'id="footnote-popup"' in body
+
+
 def test_an_unsupported_book_gets_a_named_shell(isolated_client, isolated):
     slug = upload(isolated_client, isolated, write_drm_epub, "locked.epub")
     response = isolated_client.get(f"/read/{slug}/0")

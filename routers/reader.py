@@ -9,10 +9,11 @@ Landed:
     GET /book/{slug}/{path}       book.resource(path) — the book's own bytes
                                   and media type; covers come through here
     GET /api/book/{slug}          spine + toc + metadata as JSON
+    GET /api/footnotes/{slug}/{i} resolved footnote edges (note text and
+                                  target path included, for popups)
 
 Planned, per SPEC.md:
 
-    GET /api/footnotes/{slug}/{chapter_index}  resolved footnote edges (P3)
     GET /api/text/{slug}/{chapter_index}       plain_text — AI context (P4)
 """
 
@@ -143,4 +144,53 @@ def book_api(slug: str):
         "chapter_count": book.chapter_count,
         "spine": list(book.spine),
         "toc": book.toc_json(),
+    }
+
+
+@router.get("/api/footnotes/{slug}/{chapter_index}")
+def footnote_api(slug: str, chapter_index: int):
+    """The chapter's footnote edges, resolved by the library at parse time.
+
+    A marker's edge carries the note's text and the target's book-internal
+    path, so a reader opens a footnote without fetching a rendered page.
+    A book whose markers the library cannot classify (Word-style `_ftn`
+    links, say) yields no edges — its own links still work natively.
+    """
+    from . import BOOKS_DIR, book_cache, get_db
+
+    row = get_db().get_book(slug)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
+    if not 0 <= chapter_index < book.chapter_count:
+        raise HTTPException(status_code=404, detail="No such chapter")
+    return {
+        "slug": slug,
+        "chapter_index": chapter_index,
+        "edges": book.footnotes(chapter_index),
+    }
+
+
+@router.get("/api/footnotes/{slug}/{chapter_index}")
+def footnotes_api(slug: str, chapter_index: int):
+    """The chapter's resolved footnote edges.
+
+    SPEC.md: footnotes from edges — the marker's text, the raw href it
+    carries, and the note it resolves to (chapter, path, anchor, text).
+    The reader pops these up without fetching a rendered page. A chapter
+    whose book yields no classified markers (Word-style `①` links, say)
+    comes back with zero edges; its markers keep navigating natively.
+    """
+    from . import BOOKS_DIR, book_cache, get_db
+
+    row = get_db().get_book(slug)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
+    if not 0 <= chapter_index < book.chapter_count:
+        raise HTTPException(status_code=404, detail="No such chapter")
+    return {
+        "slug": slug,
+        "chapter_index": chapter_index,
+        "edges": book.footnotes(chapter_index),
     }

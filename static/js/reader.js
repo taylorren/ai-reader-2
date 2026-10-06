@@ -105,6 +105,7 @@ document.getElementById("sidebar-expand").addEventListener("click", () => {
 
 document.addEventListener("keydown", (event) => {
     if (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA") return;
+    if (event.key === "Escape") hidePopup();
     if (event.key === "ArrowLeft") load(BOOK.index - 1);
     if (event.key === "ArrowRight") load(BOOK.index + 1);
 });
@@ -233,9 +234,119 @@ document.getElementById("font-plus").addEventListener("click", () => {
     applyFrameStyle();
 });
 
+/* ---- Footnotes: a popup per marker, from the resolved edges ----
+
+The served XHTML carries no injected ids (it is served untouched), so
+markers are matched to edges by the raw href the book wrote. A marker's
+native navigation is prevented and the note's text comes from the edges
+API — a footnote opens without fetching a rendered page. */
+
+const footnotePopup = document.getElementById("footnote-popup");
+let chapterEdges = [];
+
+function frameDocument() {
+    try {
+        return frame.contentDocument;
+    } catch {
+        return null; // opaque origin: nothing to reach
+    }
+}
+
+function loadEdges() {
+    const index = BOOK.index;
+    fetch("/api/footnotes/" + encodeURIComponent(BOOK.slug) + "/" + index)
+        .then((response) => response.json())
+        .then((data) => {
+            if (BOOK.index !== index) return; // a stale chapter response
+            chapterEdges = Array.isArray(data.edges) ? data.edges : [];
+            wireMarkers();
+        })
+        .catch(() => {
+            chapterEdges = [];
+        });
+}
+
+function wireMarkers() {
+    const doc = frameDocument();
+    if (!doc || !doc.body) return;
+    const byHref = new Map();
+    for (const edge of chapterEdges) {
+        if (edge.href) byHref.set(edge.href, edge);
+    }
+    if (!byHref.size) return;
+    for (const anchor of doc.querySelectorAll("a[href]")) {
+        if (anchor.dataset.edge) continue;
+        const edge = byHref.get(anchor.getAttribute("href"));
+        if (!edge) continue;
+        anchor.dataset.edge = "1";
+        anchor.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            showPopup(event.currentTarget, edge);
+        });
+    }
+    // A click anywhere else in the chapter dismisses the popup. (Frame
+    // elements fail `instanceof Element` against this realm — duck-type.)
+    doc.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target.closest && target.closest("a[data-edge]")) return;
+        hidePopup();
+    });
+}
+
+function showPopup(anchor, edge) {
+    footnotePopup.textContent = "";
+    const head = document.createElement("div");
+    head.className = "popup-head";
+    head.textContent = edge.text || "※";
+    footnotePopup.appendChild(head);
+    const note = document.createElement("div");
+    note.className = "popup-note" + (edge.resolved ? "" : " unresolved");
+    note.textContent = edge.resolved
+        ? (edge.target_text || "(this note block carries no text)")
+        : "这个引用无法定位 — " + (edge.href || "no href");
+    footnotePopup.appendChild(note);
+    if (edge.resolved && edge.target_href) {
+        const open = document.createElement("a");
+        open.href = "#";
+        open.className = "popup-open";
+        open.textContent = "在注释处打开 ↗";
+        open.addEventListener("click", (event) => {
+            event.preventDefault();
+            hidePopup();
+            const index = BOOK.spine.indexOf(edge.target_href);
+            load(index >= 0 ? index : edge.target_chapter, edge.target_anchor);
+        });
+        footnotePopup.appendChild(open);
+    }
+    footnotePopup.classList.add("show");
+    positionPopup(anchor);
+}
+
+function positionPopup(anchor) {
+    const markerRect = anchor.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    const width = footnotePopup.offsetWidth || 320;
+    const height = footnotePopup.offsetHeight || 120;
+    let left = frameRect.left + markerRect.left;
+    let top = frameRect.top + markerRect.bottom + 8;
+    left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
+    if (top + height > window.innerHeight - 12) {
+        top = frameRect.top + markerRect.top - height - 8;
+    }
+    top = Math.max(12, Math.min(top, window.innerHeight - height - 12));
+    footnotePopup.style.left = left + "px";
+    footnotePopup.style.top = top + "px";
+}
+
+function hidePopup() {
+    footnotePopup.classList.remove("show");
+}
+
 // In-book links navigate the frame natively; follow along so the position
 // and the TOC highlight stay in step with what the reader is looking at.
 frame.addEventListener("load", () => {
+    hidePopup();
     applyFrameStyle();
     try {
         const frameLocation = frame.contentWindow.location;
@@ -247,6 +358,7 @@ frame.addEventListener("load", () => {
             mark();
         }
     } catch (error) { /* opaque origin: nothing to sync */ }
+    loadEdges();
 });
 
 /* ---- init ---- */

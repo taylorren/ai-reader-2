@@ -284,6 +284,43 @@ body.dark-mode #toc-list a.current { color: #f0a370; background: rgba(240, 163, 
     .bar-title { display: none; }
 }
 
+/* Footnote popup: shell chrome floating over the page — the book's own
+   document is never modified. */
+.footnote-popup {
+    display: none;
+    position: fixed;
+    z-index: 30;
+    max-width: min(440px, calc(100vw - 24px));
+    background: var(--bar);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+    padding: 14px 16px;
+    font-size: 0.92em;
+    line-height: 1.7;
+}
+.footnote-popup.show { display: block; }
+
+.popup-head {
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 0.95em;
+    margin-bottom: 8px;
+}
+
+.popup-note { white-space: pre-line; }
+.popup-note.unresolved { color: var(--muted); font-style: italic; }
+
+.popup-open {
+    display: inline-block;
+    margin-top: 10px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.88em;
+}
+.popup-open:hover { text-decoration: underline; }
+
 /* Reading controls */
 
 .font-select {
