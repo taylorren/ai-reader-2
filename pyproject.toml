@@ -1,0 +1,28 @@
+[project]
+name = "ai-reader-2"
+version = "0.1.0"
+description = "Self-hosted EPUB reader with AI-assisted annotation, built on epubx"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "epubx",
+    "fastapi>=0.121.2",
+    "uvicorn>=0.38.0",
+    "jinja2>=3.1.6",
+    "httpx>=0.27.0",
+    "python-multipart>=0.0.6",
+    "pypinyin>=0.54.0",
+    "markdown-it-py",
+    "bleach",
+]
+
+# epubx is a sibling checkout, so a relative path source keeps this portable on
+# a dev machine. Note that `docker build` cannot see outside its build context:
+# the image needs a git source or a parent build context instead (see SPEC.md).
+[tool.uv.sources]
+epubx = { path = "../epubx" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

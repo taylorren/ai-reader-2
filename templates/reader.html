@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} — 阅读</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📖</text></svg>">
+    <link rel="stylesheet" href="/static/css/reader.css?v={{ asset_version }}">
+</head>
+<body>
+    <div id="reader-app">
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <a href="/" class="nav-home">← 返回图书馆</a>
+                <button id="sidebar-collapse" class="icon-btn" title="收起目录">‹</button>
+            </div>
+            <div class="sidebar-title" title="{{ title }}">{{ title }}</div>
+            <nav id="toc-list" aria-label="目录"></nav>
+        </aside>
+
+        <button id="sidebar-expand" class="sidebar-expand-btn" title="显示目录">
+            <span class="chev">›</span> 目录
+        </button>
+
+        <div id="main">
+            <div class="reader-bar">
+                <span class="bar-title" title="{{ title }}">{{ title }}</span>
+                {% if not unsupported %}
+                <nav class="chapter-nav top" aria-label="章节">
+                    <button id="top-prev" class="nav-btn" title="←">‹ 上一章</button>
+                    <span id="top-position" class="nav-position">{{ index + 1 }} / {{ chapter_count }}</span>
+                    <button id="top-next" class="nav-btn" title="→">下一章 ›</button>
+                </nav>
+                {% endif %}
+                <div class="bar-controls">
+                    <select id="font-select" class="font-select" title="字体">
+                        <option value="song">宋体</option>
+                        <option value="hei">黑体</option>
+                        <option value="kai">楷体</option>
+                        <option value="enserif">English Serif</option>
+                        <option value="ensans">English Sans</option>
+                    </select>
+                    <button id="font-minus" class="bar-btn" title="减小字号">A−</button>
+                    <button id="font-plus" class="bar-btn" title="增大字号">A+</button>
+                    <button id="style-toggle" class="style-toggle" role="switch" aria-checked="true"
+                            title="纸张样式 / 书本原样式">
+                        <span class="toggle-label">纸张</span>
+                        <span class="toggle-track"><span class="toggle-knob"></span></span>
+                    </button>
+                    <button id="theme-toggle" class="bar-btn" title="夜间模式">🌙</button>
+                </div>
+            </div>
+
+            {% if unsupported %}
+            <div class="reader-unsupported">
+                <p class="unsupported-head">⚠ 无法打开此书</p>
+                <p class="unsupported-reason">{{ unsupported }}</p>
+                <a href="/" class="btn">返回书架</a>
+            </div>
+            {% else %}
+            <main class="chapter-holder">
+                <iframe id="chapter-frame" class="chapter-frame" sandbox="allow-same-origin"
+                        src="{{ initial_src }}" title="{{ title }}"></iframe>
+            </main>
+            <footer class="reader-footer">
+                <nav class="chapter-nav bottom" aria-label="章节">
+                    <button id="bottom-prev" class="nav-btn" title="←">‹ 上一章</button>
+                    <span id="bottom-position" class="nav-position">{{ index + 1 }} / {{ chapter_count }}</span>
+                    <button id="bottom-next" class="nav-btn" title="→">下一章 ›</button>
+                </nav>
+            </footer>
+            <script>const BOOK = {{ book_data | tojson }};</script>
+            <script src="/static/js/reader.js?v={{ asset_version }}"></script>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

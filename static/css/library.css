@@ -1,0 +1,259 @@
+/* The library: grouped cards, covers from the book itself, light and dark. */
+
+:root {
+    --bg: #f4f4f9;
+    --card: #ffffff;
+    --text: #222222;
+    --muted: #777777;
+    --line: #e2e2e8;
+    --accent: #4a7dbf;
+    --accent-soft: #eaf1fa;
+    --danger: #b04a4a;
+    --ok: #4a8f5d;
+}
+
+body.dark-mode {
+    --bg: #1a1a1e;
+    --card: #26262c;
+    --text: #e2e2e2;
+    --muted: #999999;
+    --line: #3a3a42;
+    --accent: #7da7d9;
+    --accent-soft: #2c3644;
+    --danger: #d98080;
+    --ok: #85c79a;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 32px 40px 80px;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.theme-toggle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10;
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--line);
+    font-size: 1.1em;
+    cursor: pointer;
+    padding: 8px 12px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.library-header {
+    max-width: 1200px;
+    margin: 0 auto 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.library-header h1 { font-size: 1.5em; margin: 0; }
+
+.search-input {
+    flex: 1 1 260px;
+    max-width: 380px;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 0.95em;
+    outline: none;
+}
+.search-input:focus { border-color: var(--accent); }
+
+/* Upload status toast */
+
+.upload-status {
+    max-width: 1200px;
+    margin: 0 auto 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    display: none;
+}
+.upload-status.show { display: block; }
+.upload-status.success { background: #eef7ee; border-color: #bfe0c5; color: #2e6b3e; }
+.upload-status.error { background: #f9eeee; border-color: #e5bcbc; color: #8a3030; }
+body.dark-mode .upload-status.success { background: #203226; border-color: #3a5c42; color: #9fd8ab; }
+body.dark-mode .upload-status.error { background: #3a2424; border-color: #6b3a3a; color: #e5a1a1; }
+
+/* Groups and cards */
+
+main { max-width: 1200px; margin: 0 auto; }
+main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity: 0.75; }
+
+.book-group { margin-bottom: 32px; }
+.group-label {
+    font-size: 1.05em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 6px;
+    margin: 0 0 14px;
+}
+
+.book-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 18px;
+}
+
+.book-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform 0.15s, box-shadow 0.15s, opacity 0.25s;
+}
+.book-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1); }
+.book-card.completed { box-shadow: 0 0 0 2px var(--ok) inset; }
+
+.book-cover-link { text-decoration: none; color: inherit; }
+
+.book-cover {
+    aspect-ratio: 3 / 4;
+    background: var(--accent-soft);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.book-cover img { width: 100%; height: 100%; object-fit: contain; }
+.cover-placeholder {
+    font-size: 2.4em;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.book-info { min-height: 3.2em; }
+.book-title {
+    font-weight: 600;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.book-author { color: var(--muted); font-size: 0.88em; margin-top: 3px; }
+
+.book-stats { color: var(--muted); font-size: 0.82em; }
+
+.unsupported {
+    color: var(--danger);
+    font-size: 0.82em;
+    font-weight: 600;
+}
+
+.progress-summary { display: flex; align-items: center; gap: 8px; }
+.progress-bar-container {
+    flex: 1;
+    height: 6px;
+    background: var(--line);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-bar-fill {
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.4s;
+}
+.book-card.completed .progress-bar-fill { background: var(--ok); }
+.progress-text { font-size: 0.78em; color: var(--muted); white-space: nowrap; }
+.book-card.completed .progress-text { color: var(--ok); }
+
+.book-actions {
+    margin-top: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.btn {
+    background: var(--accent);
+    color: #ffffff;
+    text-decoration: none;
+    font-size: 0.88em;
+    padding: 7px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+}
+.btn:hover { filter: brightness(1.08); }
+
+.menu-wrap { position: relative; }
+.menu-btn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 1em;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+.menu-btn:hover { background: var(--accent-soft); }
+
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    min-width: 180px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+    z-index: 5;
+    overflow: hidden;
+}
+.dropdown-menu.show { display: block; }
+.dropdown-item {
+    padding: 10px 14px;
+    font-size: 0.88em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.dropdown-item:hover { background: var(--accent-soft); }
+.dropdown-item.danger { color: var(--danger); }
+
+/* Add book and empty states */
+
+.add-book-card {
+    margin-top: 8px;
+    border: 2px dashed var(--accent);
+    border-radius: 10px;
+    padding: 34px 10px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+.add-book-card:hover { background: var(--accent-soft); }
+.add-icon { font-size: 2em; color: var(--accent); }
+.add-text { margin-top: 6px; font-size: 0.9em; }
+
+#no-results { color: var(--muted); text-align: center; padding: 40px 0; }
+
+@media (max-width: 560px) {
+    body { padding: 20px 16px 60px; }
+    .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的AI电子书阅读器</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📚</text></svg>">
+    <link rel="stylesheet" href="/static/css/library.css?v={{ asset_version }}">
+</head>
+<body>
+    <div id="library-app">
+        <button class="theme-toggle" @click="toggleTheme" title="切换主题">🌙</button>
+        <header class="library-header">
+            <h1>📚 我的AI电子书阅读器</h1>
+            <input type="search" class="search-input" id="search-input"
+                   placeholder="搜索书名或作者… (Search)" @input="filterBooks">
+        </header>
+
+        <div id="upload-status" class="upload-status">
+            <span id="status-message"></span>
+        </div>
+
+        <main id="book-area">
+            {% for group in groups %}
+            <section class="book-group" data-group="{{ group.key }}">
+                <h2 class="group-label">{{ group.label }}</h2>
+                <div class="book-grid">
+                    {% for book in group.books %}
+                    <article class="book-card{% if book.is_completed %} completed{% endif %}"
+                             data-slug="{{ book.slug }}"
+                             data-progress="{{ book.progress_percent }}"
+                             data-search="{{ (book.title ~ ' ' ~ book.author) | lower }}">
+                        {% if book.unsupported %}
+                        <div class="book-cover">
+                            {% if book.cover_url %}
+                            <img src="{{ book.cover_url }}" alt="{{ book.title }}"
+                                 onerror="this.style.display='none'">
+                            {% else %}
+                            <div class="cover-placeholder">{{ book.title[:1] }}</div>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <a href="/read/{{ book.slug }}" class="book-cover-link">
+                            <div class="book-cover">
+                                {% if book.cover_url %}
+                                <img src="{{ book.cover_url }}" alt="{{ book.title }}"
+                                     onerror="this.style.display='none'">
+                                {% else %}
+                                <div class="cover-placeholder">{{ book.title[:1] }}</div>
+                                {% endif %}
+                            </div>
+                        </a>
+                        {% endif %}
+                        <div class="book-info">
+                            <div class="book-title" title="{{ book.title }}">{{ book.title }}</div>
+                            <div class="book-author">{{ book.author }}</div>
+                        </div>
+                        <div class="book-card-lower">
+                            {% if book.unsupported %}
+                            <div class="unsupported" title="{{ book.unsupported }}">⚠ 无法打开此书</div>
+                            {% endif %}
+                            {% if book.stats_display %}
+                            <span class="book-stats">{{ book.stats_display }}</span>
+                            {% endif %}
+                            {% if book.has_progress %}
+                            <div class="progress-summary">
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill" data-progress-percent="{{ book.progress_percent }}"></div>
+                                </div>
+                                <div class="progress-text progress-label">
+                                    {% if book.is_completed %}Completed{% else %}{{ book.progress_percent }}%{% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            <div class="book-actions">
+                                {% if not book.unsupported %}
+                                <a href="/read/{{ book.slug }}" class="btn">浏览本书</a>
+                                {% endif %}
+                                <div class="menu-wrap">
+                                    <button class="menu-btn" @click.stop="toggleMenu($event)">⋮</button>
+                                    <div class="dropdown-menu">
+                                        <div class="dropdown-item" @click.stop="toggleCompleted($event)">
+                                            {% if book.is_completed %}Mark as Incomplete{% else %}Mark as Completed{% endif %}
+                                        </div>
+                                        <div class="dropdown-item danger" @click.stop="deleteBook($event)">Delete Book</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endfor %}
+
+            <div id="no-results" hidden>没有找到匹配的书 (No books match)</div>
+
+            <div class="add-book-card" @click="openFilePicker">
+                <div class="add-icon">+</div>
+                <div class="add-text">Add New Book<br><small>Click to upload EPUB</small></div>
+            </div>
+            <input type="file" id="file-input" accept=".epub" @change="handleFileUpload" hidden>
+        </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+    <script src="/static/js/library-app.js?v={{ asset_version }}"></script>
+</body>
+</html>

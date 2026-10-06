@@ -1,0 +1,42 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+.pytest_cache/
+build/
+dist/
+wheels/
+*.egg-info
+
+# No pickle, ever (SPEC.md): books stay EPUBs, annotations stay SQLite
+*.pkl
+
+# Virtual environments
+.venv
+
+# The library itself: books are user data, never committed
+*.epub
+books/*
+!books/.gitkeep
+
+# Upload staging
+temp/
+uvtmp/
+
+# Data & configuration
+.env
+reader_data.db
+test.db
+
+# Backups and exports
+backups/
+*.db.backup
+reader_data_*.json
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

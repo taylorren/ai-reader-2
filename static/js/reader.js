@@ -1,0 +1,258 @@
+/* The reader shell: drives the sandboxed iframe through the spine, and
+   dresses the book's own document with the paper experience (injected —
+   the book's scripts never run). Layout mirrors the reference reader:
+   collapsible TOC sidebar, slim bar, chapter frame. */
+
+const app = document.getElementById("reader-app");
+const frame = document.getElementById("chapter-frame");
+const tocList = document.getElementById("toc-list");
+const styleToggle = document.getElementById("style-toggle");
+const themeToggle = document.getElementById("theme-toggle");
+
+const FONTS = {
+    song: 'Georgia, "Noto Serif CJK SC", "Songti SC", "SimSun", serif',
+    hei: '-apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
+    kai: '"Kaiti SC", "STKaiti", KaiTi, "Noto Serif CJK SC", serif',
+    enserif: 'Georgia, "Palatino Linotype", "Times New Roman", serif',
+    ensans: 'Helvetica, Arial, "Segoe UI", "Helvetica Neue", sans-serif',
+};
+
+const state = {
+    open: localStorage.getItem("sidebarOpen") !== "false",
+    theme: localStorage.getItem("reader-theme") === "dark" ? "dark" : "light",
+    mode: localStorage.getItem("reader-style-mode") === "book" ? "book" : "paper",
+    font: FONTS[localStorage.getItem("reader-font")]
+        ? localStorage.getItem("reader-font") : "song",
+    size: clampSize(parseInt(localStorage.getItem("reader-font-size") || "19", 10)),
+};
+
+function clampSize(size) {
+    return Math.max(12, Math.min(48, Number.isFinite(size) ? size : 19));
+}
+
+const prefix = "/book/" + encodeURIComponent(BOOK.slug) + "/";
+
+function fileURL(path, anchor) {
+    const encoded = path.split("/").map(encodeURIComponent).join("/");
+    return prefix + encoded + (anchor ? "#" + encodeURIComponent(anchor) : "");
+}
+
+function load(index, anchor) {
+    index = Math.max(0, Math.min(BOOK.spine.length - 1, index));
+    BOOK.index = index;
+    frame.src = fileURL(BOOK.spine[index], anchor);
+    mark();
+}
+
+function mark() {
+    for (const nav of navs) {
+        nav.pos.textContent = (BOOK.index + 1) + " / " + BOOK.spine.length;
+        nav.prev.disabled = BOOK.index <= 0;
+        nav.next.disabled = BOOK.index >= BOOK.spine.length - 1;
+    }
+    // Refresh-proof: the URL always names the chapter being read. Full
+    // progress — scroll percent, resume — lands in P4 with the database.
+    history.replaceState(null, "",
+        "/read/" + encodeURIComponent(BOOK.slug) + "/" + BOOK.index);
+    const current = tocList.querySelector("a.current");
+    if (current) current.classList.remove("current");
+    const active = tocList.querySelector(`a[data-path="${CSS.escape(BOOK.spine[BOOK.index])}"]`);
+    if (active) {
+        active.classList.add("current");
+        active.scrollIntoView({ block: "nearest" });
+    }
+}
+
+function renderToc(nodes, container) {
+    const ul = document.createElement("ul");
+    for (const node of nodes) {
+        const li = document.createElement("li");
+        if (node.href && BOOK.spine.includes(node.href)) {
+            const link = document.createElement("a");
+            link.href = "#";
+            link.dataset.path = node.href;
+            link.textContent = node.label || node.href;
+            const index = BOOK.spine.indexOf(node.href);
+            link.onclick = (event) => {
+                event.preventDefault();
+                load(index, node.anchor);
+            };
+            li.appendChild(link);
+        } else {
+            const span = document.createElement("span");
+            span.textContent = node.label || "";
+            li.appendChild(span);
+        }
+        if (node.children && node.children.length) renderToc(node.children, li);
+        ul.appendChild(li);
+    }
+    container.appendChild(ul);
+}
+
+function applySidebar() {
+    app.classList.toggle("sidebar-collapsed", !state.open);
+    localStorage.setItem("sidebarOpen", state.open ? "true" : "false");
+}
+
+document.getElementById("sidebar-collapse").addEventListener("click", () => {
+    state.open = false;
+    applySidebar();
+});
+document.getElementById("sidebar-expand").addEventListener("click", () => {
+    state.open = true;
+    applySidebar();
+});
+
+document.addEventListener("keydown", (event) => {
+    if (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA") return;
+    if (event.key === "ArrowLeft") load(BOOK.index - 1);
+    if (event.key === "ArrowRight") load(BOOK.index + 1);
+});
+
+/* ---- The reading experience: paper styles injected into the frame ----
+
+The frame is same-origin (sandbox="allow-same-origin"), so the shell can
+dress the book's document: a paper sheet on the desk, serif typography,
+indented paragraphs — with !important where the book's own CSS must yield.
+The book's own scripts still never run. Choosing 书本 removes the injection
+and restores the publisher's design untouched. */
+
+const READER_STYLE_ID = "reader-style";
+
+function framePaperCSS() {
+    const dark = state.theme === "dark";
+    const paper = dark
+        ? { bg: "#26211b", ink: "#cfc4b0", link: "#d5ab74",
+            shadow: "0 10px 28px rgba(0, 0, 0, 0.45)",
+            selection: "rgba(240, 163, 112, 0.25)" }
+        : { bg: "#f7f3e8", ink: "#3a3226", link: "#8c5d2e",
+            shadow: "0 10px 28px rgba(70, 55, 32, 0.12)",
+            selection: "rgba(156, 79, 46, 0.22)" };
+    return `
+html { background: transparent !important; }
+body {
+  max-width: 780px !important;
+  margin: 28px auto 48px !important;
+  padding: 70px 64px !important;
+  background: ${paper.bg} !important;
+  color: ${paper.ink} !important;
+  box-shadow: ${paper.shadow} !important;
+  border-radius: 10px;
+  min-height: calc(100vh - 76px) !important;
+  font-family: ${FONTS[state.font]} !important;
+  font-size: ${state.size}px !important;
+  line-height: 1.95 !important;
+  letter-spacing: 0.01em !important;
+}
+p { text-indent: 1.4em !important; margin-bottom: 1.25em !important; }
+h1 + p, h2 + p, h3 + p { text-indent: 0 !important; }
+h1, h2, h3 { line-height: 1.4 !important; margin-top: 1.9em !important; margin-bottom: 0.9em !important; }
+img, svg, video, table { max-width: 100% !important; height: auto !important; }
+pre { white-space: pre-wrap !important; overflow-x: auto !important; }
+a { color: ${paper.link} !important; }
+::selection { background: ${paper.selection} !important; }
+`;
+}
+
+function applyFrameStyle() {
+    let doc;
+    try {
+        doc = frame.contentDocument;
+    } catch {
+        return; // opaque origin: nothing to dress
+    }
+    if (!doc || !doc.documentElement) return;
+    let style = doc.getElementById(READER_STYLE_ID);
+    if (!style) {
+        style = doc.createElement("style");
+        style.id = READER_STYLE_ID;
+        (doc.head || doc.documentElement).appendChild(style);
+    }
+    if (state.mode === "book") {
+        // The publisher's design, untouched: no injected stylesheet.
+        style.textContent = "";
+        return;
+    }
+    style.textContent = framePaperCSS();
+}
+
+function applyTheme() {
+    document.body.classList.toggle("dark-mode", state.theme === "dark");
+    themeToggle.textContent = state.theme === "dark" ? "☀️" : "🌙";
+    localStorage.setItem("reader-theme", state.theme);
+}
+
+function applyMode() {
+    styleToggle.setAttribute("aria-checked", String(state.mode === "paper"));
+    localStorage.setItem("reader-style-mode", state.mode);
+    applyFrameStyle();
+}
+
+themeToggle.addEventListener("click", () => {
+    state.theme = state.theme === "dark" ? "light" : "dark";
+    applyTheme();
+    applyFrameStyle();
+});
+
+styleToggle.addEventListener("click", () => {
+    state.mode = state.mode === "paper" ? "book" : "paper";
+    applyMode();
+});
+
+const fontSelect = document.getElementById("font-select");
+fontSelect.value = state.font;
+fontSelect.addEventListener("change", () => {
+    state.font = fontSelect.value;
+    localStorage.setItem("reader-font", state.font);
+    applyFrameStyle();
+});
+
+function wireNav(prevId, nextId, positionId) {
+    const prev = document.getElementById(prevId);
+    const next = document.getElementById(nextId);
+    const pos = document.getElementById(positionId);
+    prev.addEventListener("click", () => load(BOOK.index - 1));
+    next.addEventListener("click", () => load(BOOK.index + 1));
+    return { prev, next, pos };
+}
+
+// The same nav in both bars — same style, so one teaches the other.
+const navs = [
+    wireNav("top-prev", "top-next", "top-position"),
+    wireNav("bottom-prev", "bottom-next", "bottom-position"),
+];
+
+document.getElementById("font-minus").addEventListener("click", () => {
+    state.size = clampSize(state.size - 1);
+    localStorage.setItem("reader-font-size", String(state.size));
+    applyFrameStyle();
+});
+document.getElementById("font-plus").addEventListener("click", () => {
+    state.size = clampSize(state.size + 1);
+    localStorage.setItem("reader-font-size", String(state.size));
+    applyFrameStyle();
+});
+
+// In-book links navigate the frame natively; follow along so the position
+// and the TOC highlight stay in step with what the reader is looking at.
+frame.addEventListener("load", () => {
+    applyFrameStyle();
+    try {
+        const frameLocation = frame.contentWindow.location;
+        if (!frameLocation.pathname.startsWith(prefix)) return;
+        const raw = decodeURIComponent(frameLocation.pathname.slice(prefix.length));
+        const index = BOOK.spine.indexOf(raw);
+        if (index >= 0 && index !== BOOK.index) {
+            BOOK.index = index;
+            mark();
+        }
+    } catch (error) { /* opaque origin: nothing to sync */ }
+});
+
+/* ---- init ---- */
+
+renderToc(BOOK.toc, tocList);
+applySidebar();
+applyTheme();
+applyMode();
+mark();
