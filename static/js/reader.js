@@ -370,16 +370,18 @@ function wireMarkers() {
     wireWordMarkers(doc);
 }
 
-/* When the library yields no edges, the frame may still carry the Word/
-   Calibre convention this export uses: a marker `_ftnrefN` pairing with a
-   note anchor `_ftnN` in the same document, the note's text following its
-   anchor. Resolve the pair locally — the native jump is prevented only
-   when the pair truly exists — so every ① opens its own note no matter
-   how many times the printed numbering restarts. */
+/* When the library yields no edges, the frame may still carry document-level
+   footnote conventions. Two rules, both resolved locally so the printed
+   numbering — however often it restarts — never matters:
 
-const CIRCLED_LEADING = /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]+\s*/;
+   (a) id/name pairing: _ftnrefN -> ftnN, fnrefN -> fnN, noterefN -> noteN
+       (the Cambridge and Calibre exports);
+   (b) href fragment into this same document: #fn674, #note-3, #_ftn5 ...
 
-function noteContainerText(doc, note) {
+   The native jump is prevented only when the paired target truly exists in
+   this document and carries text; otherwise the book's own link stays. */
+
+function noteContainerText(doc, note, markerText) {
     let node = note;
     let container = null;
     while (node && node !== doc.body) {
@@ -391,28 +393,52 @@ function noteContainerText(doc, note) {
         node = node.parentNode;
     }
     const source = container || note.parentNode || note;
-    const text = (source.textContent || "")
-        .replace(/\s+/g, " ").replace(CIRCLED_LEADING, "").trim();
+    let text = (source.textContent || "").replace(/\s+/g, " ").trim();
+    if (markerText && text.startsWith(markerText)) {
+        text = text.slice(markerText.length).replace(/^[\s.、]*/, "").trim();
+    }
     return text || null;
 }
 
 function wireWordMarkers(doc) {
-    for (const anchor of doc.querySelectorAll("a[id], a[name]")) {
+    const own = doc.location ? doc.location.pathname.split("/").pop() : "";
+    for (const anchor of doc.querySelectorAll("a[id], a[name], a[href]")) {
         if (anchor.dataset.wordMarker) continue;
+        let note = null;
+
         const ref = anchor.getAttribute("id") || anchor.getAttribute("name") || "";
-        const match = ref.match(/^_ftnref(\d+)$/);
-        if (!match) continue;
-        const noteId = "_ftn" + match[1];
-        const note = doc.getElementById(noteId)
-            || doc.querySelector('[name="' + noteId + '"]');
-        const noteText = note ? noteContainerText(doc, note) : null;
-        if (!noteText) continue; // unpaired: leave the native jump alone
+        const refMatch = ref.match(/^(?:_?ftnref|noteref)(\d+)$/);
+        if (refMatch) {
+            const noteId = ref.replace(/ref$/, "") + refMatch[1];
+            note = doc.getElementById(noteId)
+                || doc.querySelector('[name="' + noteId + '"]');
+        }
+
+        if (!note) {
+            const href = anchor.getAttribute("href") || "";
+            const hash = href.indexOf("#");
+            if (hash >= 0) {
+                const path = href.slice(0, hash).split("/").pop();
+                if (!path || path === own) {
+                    const fragment = href.slice(hash + 1);
+                    if (/^(?:_?ftn|fn|note|endnote|footnote)[-_ ]?\d+$/.test(fragment)) {
+                        note = doc.getElementById(fragment)
+                            || doc.querySelector('[name="' + fragment + '"]');
+                    }
+                }
+            }
+        }
+
+        if (!note) continue;
+        const markerText = (anchor.textContent || "").trim();
+        const noteText = noteContainerText(doc, note, markerText);
+        if (!noteText) continue; // paired but textless: the native jump stays
         anchor.dataset.wordMarker = "1";
         anchor.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
             showPopup(anchor, {
-                text: (anchor.textContent || "※").trim(),
+                text: markerText || "※",
                 resolved: true,
                 target_text: noteText,
             });
