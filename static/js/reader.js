@@ -348,7 +348,7 @@ function wireMarkers() {
         // elements fail `instanceof Element` against this realm — duck-type.)
         doc.addEventListener("click", (event) => {
             const target = event.target;
-            if (target.closest && target.closest("a[data-edge], a[data-word-marker]")) return;
+            if (target.closest && target.closest("a[data-edge]")) return;
             hidePopup();
         });
     }
@@ -365,83 +365,6 @@ function wireMarkers() {
             event.preventDefault();
             event.stopPropagation();
             showPopup(event.currentTarget, edge);
-        });
-    }
-    wireWordMarkers(doc);
-}
-
-/* When the library yields no edges, the frame may still carry document-level
-   footnote conventions. Two rules, both resolved locally so the printed
-   numbering — however often it restarts — never matters:
-
-   (a) id/name pairing: _ftnrefN -> ftnN, fnrefN -> fnN, noterefN -> noteN
-       (the Cambridge and Calibre exports);
-   (b) href fragment into this same document: #fn674, #note-3, #_ftn5 ...
-
-   The native jump is prevented only when the paired target truly exists in
-   this document and carries text; otherwise the book's own link stays. */
-
-function noteContainerText(doc, note, markerText) {
-    let node = note;
-    let container = null;
-    while (node && node !== doc.body) {
-        const tag = node.tagName;
-        if (tag === "P" || tag === "DIV" || tag === "LI" || tag === "BLOCKQUOTE") {
-            container = node;
-            break;
-        }
-        node = node.parentNode;
-    }
-    const source = container || note.parentNode || note;
-    let text = (source.textContent || "").replace(/\s+/g, " ").trim();
-    if (markerText && text.startsWith(markerText)) {
-        text = text.slice(markerText.length).replace(/^[\s.、]*/, "").trim();
-    }
-    return text || null;
-}
-
-function wireWordMarkers(doc) {
-    const own = doc.location ? doc.location.pathname.split("/").pop() : "";
-    for (const anchor of doc.querySelectorAll("a[id], a[name], a[href]")) {
-        if (anchor.dataset.wordMarker) continue;
-        let note = null;
-
-        const ref = anchor.getAttribute("id") || anchor.getAttribute("name") || "";
-        const refMatch = ref.match(/^(?:_?ftnref|noteref)(\d+)$/);
-        if (refMatch) {
-            const noteId = ref.replace(/ref$/, "") + refMatch[1];
-            note = doc.getElementById(noteId)
-                || doc.querySelector('[name="' + noteId + '"]');
-        }
-
-        if (!note) {
-            const href = anchor.getAttribute("href") || "";
-            const hash = href.indexOf("#");
-            if (hash >= 0) {
-                const path = href.slice(0, hash).split("/").pop();
-                if (!path || path === own) {
-                    const fragment = href.slice(hash + 1);
-                    if (/^(?:_?ftn|fn|note|endnote|footnote)[-_ ]?\d+$/.test(fragment)) {
-                        note = doc.getElementById(fragment)
-                            || doc.querySelector('[name="' + fragment + '"]');
-                    }
-                }
-            }
-        }
-
-        if (!note) continue;
-        const markerText = (anchor.textContent || "").trim();
-        const noteText = noteContainerText(doc, note, markerText);
-        if (!noteText) continue; // paired but textless: the native jump stays
-        anchor.dataset.wordMarker = "1";
-        anchor.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            showPopup(anchor, {
-                text: markerText || "※",
-                resolved: true,
-                target_text: noteText,
-            });
         });
     }
 }

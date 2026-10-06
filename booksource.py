@@ -152,45 +152,36 @@ class Book:
         return self._book.chapters[index].plain_text
 
     def footnotes(self, index: int) -> list[dict]:
-        """Every footnote marker in a chapter, with the block it resolves to.
+        """The chapter's footnote edges, normalized by the library.
 
-        The MVP's method: the marker may sit in one document and its note in
-        another, and the library has already resolved that edge to a block
-        id. The edge here also carries the note's text and the target's
-        book-internal path, so a reader can open a note without fetching a
-        rendered page.
+        The library recognizes the book's own footnote signals — semantic
+        ref types, footnote classes, and the compact ids of Word/Calibre
+        pipelines — and resolves each marker to the block holding its note.
+        The edge carries the note's text and the target's book-internal
+        path, so a reader opens a note without fetching a rendered page.
+        Markers the library cannot recognize yield no edges; the book's own
+        links still work natively.
         """
         if self._book is None:
             return []
         edges = []
-        for block in self._book.chapters[index].blocks:
-            for node in block:  # Block.__iter__ walks nested blocks too
-                if node.kind != "footnote_ref":
-                    continue
-                target = node.attributes.get("target_id")
-                edge = {
-                    "block_id": node.id,
-                    "text": node.text,
-                    "href": node.attributes.get("href"),
-                    "resolved": bool(target),
-                    "target_chapter": None,
-                    "target_href": None,
-                    "target_anchor": None,
-                    "target_text": None,
-                }
-                if target:
-                    # The MVP's parse: the block id is cNNNN/bMMMM.
-                    target_index = int(target[1:5])
-                    target_chapter = self._book.chapters[target_index]
-                    target_block = target_chapter.block_by_id(target)
-                    dom_ids = (target_block.attributes.get("dom_ids") or ()) if target_block else ()
-                    edge["target_chapter"] = target_index
-                    edge["target_href"] = target_chapter.href
-                    edge["target_anchor"] = dom_ids[0] if dom_ids else None
-                    edge["target_text"] = (
-                        target_block.plain_text if target_block else None
-                    )
-                edges.append(edge)
+        for note in self._book.chapters[index].footnotes:
+            target_href = None
+            target_anchor = None
+            if note.target_id is not None:
+                target_href = self._book.chapters[note.target_chapter].href
+                if note.target_dom_ids:
+                    target_anchor = note.target_dom_ids[0]
+            edges.append({
+                "block_id": note.block_id,
+                "text": note.text,
+                "href": note.href,
+                "resolved": note.target_id is not None,
+                "target_chapter": note.target_chapter,
+                "target_href": target_href,
+                "target_anchor": target_anchor,
+                "target_text": note.note_text,
+            })
         return edges
 
     # -- lifecycle -----------------------------------------------------------
