@@ -284,6 +284,41 @@ body.dark-mode #toc-list a.current { color: #f0a370; background: rgba(240, 163, 
     .bar-title { display: none; }
 }
 
+/* Footnote popup: shell chrome over the reading area; the note text comes
+   from the edges API or the frame's own document — never a page fetch. */
+.footnote-popup {
+    display: none;
+    position: fixed;
+    z-index: 30;
+    max-width: min(440px, calc(100vw - 24px));
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bar);
+    color: var(--text);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    font-size: 0.88em;
+    line-height: 1.65;
+}
+.footnote-popup.show { display: block; }
+
+.popup-head {
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 6px;
+}
+
+.popup-note.unresolved { color: var(--danger); }
+
+.popup-open {
+    display: inline-block;
+    margin-top: 8px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.92em;
+}
+.popup-open:hover { text-decoration: underline; }
+
 /* Footnote popup: shell chrome floating over the page — the book's own
    document is never modified. */
 .footnote-popup {

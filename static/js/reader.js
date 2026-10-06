@@ -269,11 +269,20 @@ function loadEdges() {
 function wireMarkers() {
     const doc = frameDocument();
     if (!doc || !doc.body) return;
+    if (!doc.body.dataset.dismissWired) {
+        doc.body.dataset.dismissWired = "1";
+        // A click anywhere else in the chapter dismisses the popup. (Frame
+        // elements fail `instanceof Element` against this realm — duck-type.)
+        doc.addEventListener("click", (event) => {
+            const target = event.target;
+            if (target.closest && target.closest("a[data-edge], a[data-word-marker]")) return;
+            hidePopup();
+        });
+    }
     const byHref = new Map();
     for (const edge of chapterEdges) {
         if (edge.href) byHref.set(edge.href, edge);
     }
-    if (!byHref.size) return;
     for (const anchor of doc.querySelectorAll("a[href]")) {
         if (anchor.dataset.edge) continue;
         const edge = byHref.get(anchor.getAttribute("href"));
@@ -285,13 +294,57 @@ function wireMarkers() {
             showPopup(event.currentTarget, edge);
         });
     }
-    // A click anywhere else in the chapter dismisses the popup. (Frame
-    // elements fail `instanceof Element` against this realm — duck-type.)
-    doc.addEventListener("click", (event) => {
-        const target = event.target;
-        if (target.closest && target.closest("a[data-edge]")) return;
-        hidePopup();
-    });
+    wireWordMarkers(doc);
+}
+
+/* When the library yields no edges, the frame may still carry the Word/
+   Calibre convention this export uses: a marker `_ftnrefN` pairing with a
+   note anchor `_ftnN` in the same document, the note's text following its
+   anchor. Resolve the pair locally — the native jump is prevented only
+   when the pair truly exists — so every ① opens its own note no matter
+   how many times the printed numbering restarts. */
+
+const CIRCLED_LEADING = /^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]+\s*/;
+
+function noteContainerText(doc, note) {
+    let node = note;
+    let container = null;
+    while (node && node !== doc.body) {
+        const tag = node.tagName;
+        if (tag === "P" || tag === "DIV" || tag === "LI" || tag === "BLOCKQUOTE") {
+            container = node;
+            break;
+        }
+        node = node.parentNode;
+    }
+    const source = container || note.parentNode || note;
+    const text = (source.textContent || "")
+        .replace(/\s+/g, " ").replace(CIRCLED_LEADING, "").trim();
+    return text || null;
+}
+
+function wireWordMarkers(doc) {
+    for (const anchor of doc.querySelectorAll("a[id], a[name]")) {
+        if (anchor.dataset.wordMarker) continue;
+        const ref = anchor.getAttribute("id") || anchor.getAttribute("name") || "";
+        const match = ref.match(/^_ftnref(\d+)$/);
+        if (!match) continue;
+        const noteId = "_ftn" + match[1];
+        const note = doc.getElementById(noteId)
+            || doc.querySelector('[name="' + noteId + '"]');
+        const noteText = note ? noteContainerText(doc, note) : null;
+        if (!noteText) continue; // unpaired: leave the native jump alone
+        anchor.dataset.wordMarker = "1";
+        anchor.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            showPopup(anchor, {
+                text: (anchor.textContent || "※").trim(),
+                resolved: true,
+                target_text: noteText,
+            });
+        });
+    }
 }
 
 function showPopup(anchor, edge) {
@@ -358,7 +411,8 @@ frame.addEventListener("load", () => {
             mark();
         }
     } catch (error) { /* opaque origin: nothing to sync */ }
-    loadEdges();
+    wireMarkers();  // word-convention markers wire immediately
+    loadEdges();    // library-classified edges wire when they arrive
 });
 
 /* ---- init ---- */
