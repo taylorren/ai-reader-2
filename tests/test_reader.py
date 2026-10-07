@@ -175,6 +175,18 @@ def test_progress_rejects_a_bad_chapter_and_unknown_book(
     assert unknown.status_code == 404
 
 
+def test_the_shell_asset_version_covers_the_panel(isolated_client, isolated):
+    """panel.js must be in the cache-busting token, or a browser that has the
+    old copy keeps it — and the panel's fixes never arrive."""
+    from routers import get_asset_version
+
+    slug = upload(isolated_client, isolated)
+    body = isolated_client.get(f"/read/{slug}/0").text
+    expected = str(get_asset_version(
+        "static/js/reader.js", "static/js/panel.js", "static/css/reader.css"))
+    assert expected in body
+
+
 def test_the_shell_carries_a_highlight_deep_link(isolated_client, isolated):
     """?highlight=<id> reaches the shell, so "在书中定位" can scroll to it."""
     slug = upload(isolated_client, isolated)

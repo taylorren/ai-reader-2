@@ -287,6 +287,10 @@ function scheduleProgressSave() {
 }
 
 function restoreScroll(chapter) {
+    // A "在书中定位" deep link outranks the saved position: the reader asked
+    // for that passage, not for where they left off. Its delayed scroll would
+    // otherwise land after the highlight's, pulling the reader away from it.
+    if (BOOK.target_highlight) return;
     let percent = null;
     if (pendingRestore && pendingRestore.chapter === chapter) {
         percent = pendingRestore.percent;
@@ -460,6 +464,7 @@ frame.addEventListener("load", () => {
 /* ---- init ---- */
 
 ReaderPanel.setBook(BOOK.slug);
+ReaderPanel.setChapter(BOOK.index);
 ReaderPanel.init();
 renderToc(BOOK.toc, tocList);
 applySidebar();

@@ -121,7 +121,7 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
             "chapter_count": book.chapter_count,
             "unsupported": row["unsupported"],
             "asset_version": get_asset_version(
-                "static/js/reader.js", "static/css/reader.css"),
+                "static/js/reader.js", "static/js/panel.js", "static/css/reader.css"),
             "initial_src": (
                 f"/book/{quote(slug, safe='')}/"
                 f"{quote(book.spine[chapter_index], safe='/')}"

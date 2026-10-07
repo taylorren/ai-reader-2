@@ -16,6 +16,16 @@ window.ReaderPanel = (function () {
         highlight: "高亮",
     };
 
+    // The mark colours, mirrored by reader.js's injected frame CSS. They are
+    // also set inline (with `important`) at paint time, so a book's own CSS
+    // cannot hide a highlight.
+    const KIND_COLORS = {
+        fact_check: "rgba(217, 164, 65, 0.42)",
+        discussion: "rgba(90, 143, 214, 0.38)",
+        comment: "rgba(79, 174, 122, 0.38)",
+        highlight: "rgba(176, 111, 208, 0.34)",
+    };
+
     const state = {
         slug: null,
         index: 0,
@@ -618,6 +628,10 @@ window.ReaderPanel = (function () {
         mark.className = "reader-highlight hl-" + (highlight.kind || "highlight");
         mark.dataset.highlightId = highlight.id;
         mark.title = KIND_LABELS[highlight.kind] || "高亮";
+        // The colour is set inline with `important`, so a book whose own CSS
+        // paints every <mark>/<small>/<b> cannot hide the highlight.
+        mark.style.setProperty("background",
+            KIND_COLORS[highlight.kind] || KIND_COLORS.highlight, "important");
         try {
             range.surroundContents(mark);
         } catch (error) {
@@ -629,16 +643,18 @@ window.ReaderPanel = (function () {
 
     function paint(blocks, highlights) {
         const doc = frameEl().contentDocument;
-        if (!doc) return;
+        if (!doc) return 0;
         clearMarks(doc);
+        let painted = 0;
         for (const highlight of highlights) {
             const block = highlight.block_id
                 ? blocks.find((item) => item.id === highlight.block_id)
                 : findBlockForText(blocks, highlight.selected_text);
             const root = block ? blockElement(doc, block) : doc.body;
             if (!root) continue;
-            wrapText(doc, root, highlight.selected_text, highlight);
+            if (wrapText(doc, root, highlight.selected_text, highlight)) painted += 1;
         }
+        return painted;
     }
 
     async function refreshHighlights() {
@@ -646,9 +662,18 @@ window.ReaderPanel = (function () {
         try {
             const blocks = await blocksFor(state.index);
             const highlights = await highlightsFor(state.index);
-            paint(blocks, highlights);
+            const painted = paint(blocks, highlights);
+            if (highlights.length > painted) {
+                // Named, not silent: a highlight whose text cannot be found in
+                // the served document is reported rather than lost.
+                const missing = highlights.length - painted;
+                console.warn(`ai-reader: ${missing} highlight(s) not located in chapter ${state.index}`);
+                toast(`本章有 ${missing} 条高亮未能定位`);
+            }
             revealTarget();
-        } catch (error) { /* the chapter may have moved on */ }
+        } catch (error) {
+            console.warn("ai-reader: could not load highlights", error);
+        }
     }
 
     // A "在书中定位" link arrives as ?highlight=<id>. Once the mark is painted,
@@ -704,6 +729,13 @@ window.ReaderPanel = (function () {
     P.setBook = function (slug) { state.slug = slug; };
 
     P.onFrameLoad = async function () {
+        // The frame is the truth about which chapter is on screen. A direct
+        // load of /read/{slug}/{n} (a bookmark, or 在书中定位) never goes
+        // through load(), so setChapter() alone would leave the panel looking
+        // at chapter 0 — and painting nothing.
+        if (window.BOOK && Number.isInteger(window.BOOK.index)) {
+            state.index = window.BOOK.index;
+        }
         P.wireSelection();
         await refreshHighlights();
     };
