@@ -96,13 +96,32 @@ body.dark-mode .upload-status.error { background: #3a2424; border-color: #6b3a3a
 main { max-width: 1200px; margin: 0 auto; }
 main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity: 0.75; }
 
-.book-group { margin-bottom: 32px; }
-.group-label {
-    font-size: 1.05em;
+/* The letter index: one flat grid of books, filtered by a pill row (the
+   reference reader's shape — grouping is the filter, not headings). */
+.library-index {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 18px;
+}
+
+.library-index-link {
+    min-width: 34px;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--card);
     color: var(--muted);
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 6px;
-    margin: 0 0 14px;
+    font-size: 0.88em;
+    font-weight: 600;
+    cursor: pointer;
+}
+.library-index-link:hover { border-color: var(--accent); color: var(--accent); }
+.library-index-link.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
 }
 
 .book-grid {
@@ -110,6 +129,8 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 18px;
 }
+
+.book-card.hidden { display: none; }
 
 .book-card {
     background: var(--card);
@@ -227,6 +248,9 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
 }
 .dropdown-menu.show { display: block; }
 .dropdown-item {
+    display: block;
+    color: inherit;
+    text-decoration: none;
     padding: 10px 14px;
     font-size: 0.88em;
     cursor: pointer;
@@ -235,21 +259,32 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
 .dropdown-item:hover { background: var(--accent-soft); }
 .dropdown-item.danger { color: var(--danger); }
 
-/* Add book and empty states */
+/* Add book: shaped like the book cards around it, so it reads as a book in
+   the shelf rather than a dashed placeholder. */
 
 .add-book-card {
-    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 240px;
+    padding: 20px 14px;
+    background: var(--card);
     border: 2px dashed var(--accent);
     border-radius: 10px;
-    padding: 34px 10px;
-    text-align: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
     color: var(--muted);
+    text-align: center;
     cursor: pointer;
-    transition: background-color 0.15s;
+    transition: background-color 0.15s, transform 0.15s;
 }
-.add-book-card:hover { background: var(--accent-soft); }
-.add-icon { font-size: 2em; color: var(--accent); }
-.add-text { margin-top: 6px; font-size: 0.9em; }
+.add-book-card:hover {
+    background: var(--accent-soft);
+    transform: translateY(-2px);
+}
+.add-icon { font-size: 3em; line-height: 1; color: var(--accent); }
+.add-text { font-size: 0.92em; }
 
 #no-results { color: var(--muted); text-align: center; padding: 40px 0; }
 

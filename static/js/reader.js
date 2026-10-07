@@ -32,6 +32,13 @@ function clampSize(size) {
 
 const prefix = "/book/" + encodeURIComponent(BOOK.slug) + "/";
 
+// The same directory, decoded. The server builds srcs with Python's `quote`,
+// which escapes "(" and ")" as %28/%29; `encodeURIComponent` leaves them
+// literal — so an encoded-form comparison silently failed for any slug with
+// parentheses (most translated titles have them) and the frame-load handler
+// bailed before wiring the panel. Compare decoded paths instead.
+const bookPrefix = "/book/" + BOOK.slug + "/";
+
 function fileURL(path, anchor) {
     const encoded = path.split("/").map(encodeURIComponent).join("/");
     return prefix + encoded + (anchor ? "#" + encodeURIComponent(anchor) : "");
@@ -138,6 +145,35 @@ mark.reader-highlight.flash { animation: reader-hl-flash 0.8s ease 3; }
 }
 `;
 
+// The "last read position" rule is drawn in the frame's document as well, so
+// its colours must be injected there too. It is *positioned*, not in the flow:
+// an in-flow element would shift the text under the reader, and Firefox's
+// scroll anchoring would compensate by scrolling past it — leaving the badge
+// just above the fold.
+const RESUME_CSS = `
+body { position: relative; }
+.reader-resume-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 2px solid #2f7bd6;
+  cursor: pointer;
+}
+.reader-resume-line span {
+  position: absolute;
+  right: 0;
+  top: -0.85em;
+  padding: 2px 8px;
+  border-radius: 4px 4px 0 4px;
+  background: #2f7bd6;
+  color: #ffffff;
+  font-size: 0.72em;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+`;
+
 function framePaperCSS() {
     const dark = state.theme === "dark";
     const paper = dark
@@ -189,11 +225,11 @@ function applyFrameStyle() {
     }
     if (state.mode === "book") {
         // The publisher's design, untouched: no paper stylesheet — but the
-        // painted highlights still need their colours.
-        style.textContent = HIGHLIGHT_CSS;
+        // painted highlights and the resume rule still need their colours.
+        style.textContent = HIGHLIGHT_CSS + RESUME_CSS;
         return;
     }
-    style.textContent = framePaperCSS() + HIGHLIGHT_CSS;
+    style.textContent = framePaperCSS() + HIGHLIGHT_CSS + RESUME_CSS;
 }
 
 function applyTheme() {
@@ -286,6 +322,86 @@ function scheduleProgressSave() {
     scrollSaveTimer = setTimeout(() => saveProgress(frameScrollPercent()), 500);
 }
 
+/* A resumed position is announced once, so the reader knows the page did not
+   open at the top by accident — and can jump back to the start. */
+let resumeNoticeShown = false;
+
+function showResumeNotice(percent) {
+    const notice = document.getElementById("resume-notice");
+    if (!notice) return;
+    document.getElementById("resume-text").textContent =
+        `⏱ 已回到上次阅读位置 · 第 ${BOOK.index + 1} 章 · ${Math.round(percent)}%`;
+    notice.hidden = false;
+}
+
+function wireResumeNotice() {
+    const notice = document.getElementById("resume-notice");
+    if (!notice) return;
+    document.getElementById("resume-top").addEventListener("click", () => {
+        try {
+            frame.contentWindow.scrollTo(0, 0);
+        } catch { /* opaque origin */ }
+        saveProgress(0);
+        clearResumeMarker();
+        notice.hidden = true;
+    });
+    document.getElementById("resume-dismiss").addEventListener("click", () => {
+        notice.hidden = true;
+    });
+}
+
+/* The "last read position" rule: a line drawn across the column where the
+   reader stopped, injected into the frame's document (in memory only — the
+   book's file is never touched, exactly like the highlight marks). It is
+   anchored to the block that the restored scroll put at the top of the
+   viewport, so it sits on a paragraph boundary rather than mid-line. */
+
+const RESUME_MARK_BLOCKS = ["P", "H1", "H2", "H3", "H4", "H5", "H6", "LI",
+                            "BLOCKQUOTE", "PRE", "TD", "DT", "DD"];
+const RESUME_MARK_SELECTOR = RESUME_MARK_BLOCKS.join(",").toLowerCase();
+
+function clearResumeMarker() {
+    const doc = frameDocument();
+    const existing = doc && doc.querySelector(".reader-resume-line");
+    if (existing) existing.remove();
+}
+
+function placeResumeMarker() {
+    const doc = frameDocument();
+    if (!doc || !doc.body) return;
+    clearResumeMarker();
+    const win = frame.contentWindow;
+    const anchor = resumeAnchorBlock(doc);
+    if (!anchor) return;
+    // Positioned, not inserted into the flow: no layout shift, so the restored
+    // scroll stays exactly where the reader left it — nothing is nudged, and
+    // nothing fights the rule for the viewport. The rule is drawn at the
+    // paragraph's own top edge, so it sits in the gap between paragraphs
+    // instead of cutting across a line of text.
+    const pageY = win.pageYOffset || 0;
+    const bodyTop = doc.body.getBoundingClientRect().top + pageY;
+    const anchorTop = anchor.getBoundingClientRect().top + pageY;
+    const line = doc.createElement("div");
+    line.className = "reader-resume-line";
+    line.title = "点击隐藏";
+    line.style.top = Math.round(anchorTop - bodyTop) + "px";
+    const tag = doc.createElement("span");
+    tag.textContent = "上次读到此处";
+    line.appendChild(tag);
+    line.addEventListener("click", () => line.remove());
+    doc.body.appendChild(line);
+}
+
+/* The first paragraph boundary at or below the top edge: the rule sits in the
+   gap above it. The paragraph the reader stopped inside is usually partly
+   scrolled past, and a rule at its top edge would be above the fold. */
+function resumeAnchorBlock(doc) {
+    for (const block of doc.querySelectorAll(RESUME_MARK_SELECTOR)) {
+        if (block.getBoundingClientRect().top >= 2) return block;
+    }
+    return doc.body.querySelector(RESUME_MARK_SELECTOR);
+}
+
 function restoreScroll(chapter) {
     // A "在书中定位" deep link outranks the saved position: the reader asked
     // for that passage, not for where they left off. Its delayed scroll would
@@ -308,7 +424,18 @@ function restoreScroll(chapter) {
         } catch { /* opaque origin */ }
     };
     scrollToPercent();
-    setTimeout(scrollToPercent, 350);
+    // The reader should know why the page did not open at the top — and where
+    // it opened — but only for the return that this session resumed.
+    const placed = !resumeNoticeShown;
+    if (placed) {
+        resumeNoticeShown = true;
+        showResumeNotice(percent);
+        placeResumeMarker();
+    }
+    setTimeout(() => {
+        scrollToPercent();
+        if (placed) placeResumeMarker();   // re-aim once the layout has settled
+    }, 350);
 }
 
 function wireFrameScroll() {
@@ -447,15 +574,17 @@ frame.addEventListener("load", () => {
     wireFrameScroll();
     restoreScroll(BOOK.index);
     try {
-        const frameLocation = frame.contentWindow.location;
-        if (!frameLocation.pathname.startsWith(prefix)) return;
-        const raw = decodeURIComponent(frameLocation.pathname.slice(prefix.length));
-        const index = BOOK.spine.indexOf(raw);
-        if (index >= 0 && index !== BOOK.index) {
-            BOOK.index = index;
-            mark();
+        const pathname = decodeURIComponent(frame.contentWindow.location.pathname);
+        if (pathname.startsWith(bookPrefix)) {
+            const index = BOOK.spine.indexOf(pathname.slice(bookPrefix.length));
+            if (index >= 0 && index !== BOOK.index) {
+                BOOK.index = index;
+                mark();
+            }
         }
     } catch (error) { /* opaque origin: nothing to sync */ }
+    // Wiring happens whatever the frame navigated to: an unrelated URL must
+    // never leave the reader without footnotes or highlights.
     wireMarkers();  // word-convention markers wire immediately
     loadEdges();    // library-classified edges wire when they arrive
     ReaderPanel.onFrameLoad();  // selection + saved highlights for this chapter
@@ -466,6 +595,7 @@ frame.addEventListener("load", () => {
 ReaderPanel.setBook(BOOK.slug);
 ReaderPanel.setChapter(BOOK.index);
 ReaderPanel.init();
+wireResumeNotice();
 renderToc(BOOK.toc, tocList);
 applySidebar();
 applyTheme();
@@ -479,3 +609,7 @@ wireMarkers();
 loadEdges();
 ReaderPanel.onFrameLoad();
 setTimeout(wireMarkers, 300);
+// A cached chapter can finish loading before the listener above was attached,
+// so its `load` event never reaches us. Ask the panel again shortly: that also
+// gives the frame's layout time to settle before any deep-link reveal.
+setTimeout(() => ReaderPanel.onFrameLoad(), 400);

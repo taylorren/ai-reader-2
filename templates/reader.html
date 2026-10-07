@@ -58,6 +58,13 @@
                 <a href="/" class="btn">返回书架</a>
             </div>
             {% else %}
+            <!-- Shown once when a saved position was restored, so the reader
+                 knows the page did not open at the top by accident. -->
+            <div id="resume-notice" class="resume-notice" hidden>
+                <span id="resume-text"></span>
+                <button id="resume-top" class="btn">回到开头</button>
+                <button id="resume-dismiss" class="icon-btn" title="关闭">×</button>
+            </div>
             <main class="chapter-holder">
                 <iframe id="chapter-frame" class="chapter-frame" sandbox="allow-same-origin"
                         src="{{ initial_src }}" title="{{ title }}"></iframe>
@@ -111,9 +118,9 @@
                     <button id="bottom-next" class="nav-btn" title="→">下一章 ›</button>
                 </nav>
             </footer>
-            <script>const BOOK = {{ book_data | tojson }};</script>
-            <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+            <script>window.BOOK = {{ book_data | tojson }};</script>
+            <script src="/static/vendor/marked.min.js"></script>
+            <script src="/static/vendor/purify.min.js"></script>
             <script src="/static/js/panel.js?v={{ asset_version }}"></script>
             <script src="/static/js/reader.js?v={{ asset_version }}"></script>
             {% endif %}

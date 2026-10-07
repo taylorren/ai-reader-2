@@ -6,7 +6,14 @@ and reload when the grouping changes (upload, completion). */
 const { createApp } = Vue;
 
 const app = createApp({
-    data() { return {}; },
+    data() {
+        return {
+            // The two library filters, combined: a free-text query and the
+            // letter index ("all" shows every group).
+            query: "",
+            group: "all",
+        };
+    },
     mounted() {
         if (localStorage.getItem("reader-theme") === "dark") {
             document.body.classList.add("dark-mode");
@@ -24,23 +31,29 @@ const app = createApp({
             localStorage.setItem("reader-theme", isDark ? "dark" : "light");
         },
         filterBooks(event) {
-            const query = event.target.value.trim().toLowerCase();
-            document.querySelectorAll(".book-card").forEach((card) => {
-                card.style.display =
-                    (!query || (card.dataset.search || "").includes(query)) ? "" : "none";
-            });
-            this.hideEmptyGroups();
+            this.query = event.target.value.trim().toLowerCase();
+            this.applyFilters();
         },
-        hideEmptyGroups() {
-            document.querySelectorAll(".book-group").forEach((group) => {
-                const visible = [...group.querySelectorAll(".book-card")]
-                    .some((card) => card.style.display !== "none");
-                group.style.display = visible ? "" : "none";
+        setGroupFilter(key, event) {
+            this.group = key;
+            document.querySelectorAll(".library-index-link")
+                .forEach((pill) => pill.classList.toggle("active", pill === event.currentTarget));
+            this.applyFilters();
+        },
+        applyFilters() {
+            // A card shows when it matches the query *and* the chosen letter.
+            let visible = 0;
+            document.querySelectorAll(".book-card").forEach((card) => {
+                const matchesQuery = !this.query ||
+                    (card.dataset.search || "").includes(this.query);
+                const matchesGroup = this.group === "all" ||
+                    card.dataset.group === this.group;
+                const show = matchesQuery && matchesGroup;
+                card.classList.toggle("hidden", !show);
+                if (show) visible += 1;
             });
-            const any = [...document.querySelectorAll(".book-card")]
-                .some((card) => card.style.display !== "none");
             const none = document.getElementById("no-results");
-            if (none) none.hidden = any;
+            if (none) none.hidden = visible > 0;
         },
         toggleMenu(event) {
             const menu = event.currentTarget.parentElement.querySelector(".dropdown-menu");
@@ -96,7 +109,7 @@ const app = createApp({
                 if (!response.ok) throw new Error(result.detail || "Failed to delete book");
                 card.style.opacity = "0";
                 card.style.transform = "scale(0.8)";
-                setTimeout(() => { card.remove(); this.hideEmptyGroups(); }, 250);
+                setTimeout(() => { card.remove(); this.applyFilters(); }, 250);
                 this.showStatus(`✓ ${result.message}`, "success");
             } catch (error) {
                 alert(`Error: ${error.message}`);

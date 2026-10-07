@@ -21,13 +21,23 @@
         </div>
 
         <main id="book-area">
-            {% for group in groups %}
-            <section class="book-group" data-group="{{ group.key }}">
-                <h2 class="group-label">{{ group.label }}</h2>
-                <div class="book-grid">
-                    {% for book in group.books %}
+            {% if groups %}
+            <div class="library-index">
+                <button type="button" class="library-index-link active" data-group="all"
+                        @click="setGroupFilter('all', $event)">全部</button>
+                {% for group in groups %}
+                <button type="button" class="library-index-link" data-group="{{ group.key }}"
+                        @click="setGroupFilter('{{ group.key }}', $event)">{{ group.label }}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="book-grid">
+                {% for group in groups %}
+                {% for book in group.books %}
                     <article class="book-card{% if book.is_completed %} completed{% endif %}"
                              data-slug="{{ book.slug }}"
+                             data-group="{{ book.title_group }}"
                              data-progress="{{ book.progress_percent }}"
                              data-search="{{ (book.title ~ ' ' ~ book.author) | lower }}">
                         {% if book.unsupported %}
@@ -89,21 +99,20 @@
                             </div>
                         </div>
                     </article>
-                    {% endfor %}
+                {% endfor %}
+                {% endfor %}
+
+                <div class="add-book-card" @click="openFilePicker">
+                    <div class="add-icon">+</div>
+                    <div class="add-text">Add New Book<br><small>Click to upload EPUB</small></div>
                 </div>
-            </section>
-            {% endfor %}
+            </div>
 
             <div id="no-results" hidden>没有找到匹配的书 (No books match)</div>
-
-            <div class="add-book-card" @click="openFilePicker">
-                <div class="add-icon">+</div>
-                <div class="add-text">Add New Book<br><small>Click to upload EPUB</small></div>
-            </div>
             <input type="file" id="file-input" accept=".epub" @change="handleFileUpload" hidden>
         </main>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+    <script src="/static/vendor/vue.global.prod.js"></script>
     <script src="/static/js/library-app.js?v={{ asset_version }}"></script>
 </body>
 </html>

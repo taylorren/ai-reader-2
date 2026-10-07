@@ -44,6 +44,14 @@ window.ReaderPanel = (function () {
     const el = (id) => document.getElementById(id);
     const frameEl = () => el("chapter-frame");
 
+    // The shell hands its data to the scripts. `const BOOK = {...}` in a
+    // classic <script> is a *lexical* global, not a property of `window`, so
+    // read the bare identifier (guarded — `typeof` on an unknown name is safe)
+    // and fall back to `window.BOOK` for when the shell sets it that way.
+    function bookData() {
+        return (typeof BOOK !== "undefined" && BOOK) || window.BOOK || {};
+    }
+
     function escapeHtml(text) {
         const node = document.createElement("div");
         node.textContent = text == null ? "" : String(text);
@@ -676,18 +684,55 @@ window.ReaderPanel = (function () {
         }
     }
 
-    // A "在书中定位" link arrives as ?highlight=<id>. Once the mark is painted,
-    // scroll it into view and flash it — the point of the link is to land on
-    // the passage, not merely on the chapter that holds it.
-    function revealTarget() {
-        const target = window.BOOK && window.BOOK.target_highlight;
+    // A "在书中定位" link arrives as ?highlight=<id>. The mark is painted into
+    // the frame, whose own document is the scroll container, so the reader is
+    // moved by offset — a smooth scrollIntoView into a large chapter can land
+    // short when the layout is still settling — and re-aimed once it does.
+    function revealTarget(attempt = 0) {
+        const target = bookData().target_highlight;
         if (!target) return;
         const doc = frameEl().contentDocument;
-        const mark = doc && doc.querySelector(`mark[data-highlight-id="${target}"]`);
-        if (!mark) return;
-        mark.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (!doc) return;
+        const mark = doc.querySelector(`mark[data-highlight-id="${target}"]`);
+        if (!mark) {
+            // The frame may still be loading — a cached chapter can beat the
+            // shell's script, in which case its `load` event fired before the
+            // listener existed and the load path never runs at all. Keep
+            // looking until the document is complete, then report.
+            if (doc.readyState !== "complete" && attempt < 20) {
+                setTimeout(() => revealTarget(attempt + 1), 200);
+            } else {
+                console.warn("ai-reader: highlight not found in this chapter", target);
+            }
+            return;
+        }
         mark.classList.add("flash");
+        scrollToMark(mark);
+        setTimeout(() => scrollToMark(mark), 300);   // images and fonts settle
+        setTimeout(() => scrollToMark(mark), 900);
         setTimeout(() => mark.classList.remove("flash"), 2400);
+    }
+
+    // The chapter documents carry no <!DOCTYPE>, so the frame renders in
+    // quirks mode ("此页面处于怪异模式"). There, `document.scrollingElement` is
+    // the *body*, so reading `scrollTop` off it lands the reader short — so we
+    // do not compute an offset at all. The browser scrolls (scrollIntoView is
+    // correct in both modes), and then we *measure*: if the mark is still
+    // outside the shell's container, the frame was not the scroller and the
+    // container is moved instead. Both cases, decided by measurement.
+    function scrollToMark(mark) {
+        const win = frameEl().contentWindow;
+        const holder = document.querySelector(".chapter-holder");
+        mark.scrollIntoView({ block: "center", behavior: "auto" });
+        if (!win) return;
+        const rect = mark.getBoundingClientRect();
+        const frameRect = frameEl().getBoundingClientRect();
+        const offsetInHolder = frameRect.top
+            - (holder ? holder.getBoundingClientRect().top : 0) + rect.top;
+        if (holder &&
+            (offsetInHolder < 0 || offsetInHolder > holder.clientHeight - rect.height)) {
+            holder.scrollTop += offsetInHolder - (holder.clientHeight - rect.height) / 2;
+        }
     }
 
     function showHighlight(highlightId) {
@@ -733,8 +778,9 @@ window.ReaderPanel = (function () {
         // load of /read/{slug}/{n} (a bookmark, or 在书中定位) never goes
         // through load(), so setChapter() alone would leave the panel looking
         // at chapter 0 — and painting nothing.
-        if (window.BOOK && Number.isInteger(window.BOOK.index)) {
-            state.index = window.BOOK.index;
+        const index = bookData().index;
+        if (Number.isInteger(index)) {
+            state.index = index;
         }
         P.wireSelection();
         await refreshHighlights();

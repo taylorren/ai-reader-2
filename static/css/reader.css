@@ -576,5 +576,20 @@ body.dark-mode #toc-list a.current { color: #f0a370; background: rgba(240, 163, 
     pointer-events: none;
     transition: opacity 0.2s, transform 0.2s;
 }
-.toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast.error { background: rgba(176, 74, 74, 0.95); }
+/* A resumed reading position: a one-off notice under the bar, so the reader
+   knows the page did not open at the top by accident. Dismissed, or used to
+   jump back to the beginning. */
+.resume-notice {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    background: var(--accent-soft);
+    border-bottom: 1px solid var(--line);
+    color: var(--text);
+    font-size: 0.85em;
+}
+#resume-text { flex: 1; }
+.resume-notice .btn { padding: 4px 10px; font-size: 0.95em; }
+

@@ -197,6 +197,25 @@ def test_the_shell_carries_a_highlight_deep_link(isolated_client, isolated):
     assert '"target_highlight": ""' in plain or '"target_highlight":""' in plain
 
 
+def test_the_shell_carries_the_resume_notice(isolated_client, isolated):
+    """A restored position is announced: the reader sees where it resumed."""
+    slug = upload(isolated_client, isolated)
+    body = isolated_client.get(f"/read/{slug}/0").text
+    assert 'id="resume-notice"' in body
+    assert 'id="resume-text"' in body
+    assert 'id="resume-top"' in body
+
+
+def test_the_shell_loads_its_scripts_from_the_repo(isolated_client, isolated):
+    """No runtime CDN: marked/DOMPurify come from static/vendor."""
+    slug = upload(isolated_client, isolated)
+    body = isolated_client.get(f"/read/{slug}/0").text
+    assert "/static/vendor/marked.min.js" in body
+    assert "/static/vendor/purify.min.js" in body
+    assert "cdn.jsdelivr.net" not in body
+    assert isolated_client.get("/static/vendor/marked.min.js").status_code == 200
+
+
 def test_an_unsupported_book_gets_a_named_shell(isolated_client, isolated):
     slug = upload(isolated_client, isolated, write_drm_epub, "locked.epub")
     response = isolated_client.get(f"/read/{slug}/0")
