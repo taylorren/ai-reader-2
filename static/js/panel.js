@@ -290,6 +290,19 @@ window.ReaderPanel = (function () {
         const doc = frameEl().contentDocument;
         if (!doc || doc._panelWired) return;
         doc._panelWired = true;
+        // The panel is a fixed overlay in the *shell* document, so a press
+        // inside the book is always outside it — but the frame is its own
+        // event tree, and the shell's click-outside listener never sees these
+        // presses. Close here instead (requestClose, so the in-flight-analysis
+        // rule holds). A press on a painted highlight is the exception: that
+        // highlight's own click handler opens the panel for it, so closing
+        // first would only flicker — and could wipe an analysis in flight.
+        doc.addEventListener("mousedown", (event) => {
+            if (el("ai-panel").hidden) return;
+            const target = event.target;
+            if (target.closest && target.closest("mark.reader-highlight")) return;
+            requestClose();
+        });
         doc.addEventListener("mouseup", async (event) => {
             const selection = await computeSelection();
             if (!selection) { hideContextMenu(); return; }
