@@ -180,8 +180,9 @@ markdown-it-py · bleach · python-multipart.
 
 **Dropped from ai-reader:** ebooklib, beautifulsoup4, and pickle.
 
-**Frontend unchanged in kind:** Jinja + Vue 3 (CDN) + marked + DOMPurify, no
-build step, no `node_modules`.
+**Frontend unchanged in kind:** Jinja + Vue 3 + marked + DOMPurify — the
+published bundles are vendored in `static/vendor/` (see its README), so there
+is no runtime CDN dependency, no build step and no `node_modules`.
 
 **Dependency mechanics (decide early).** epubx as a path dependency
 (`epubx @ file:///Users/tr/projects/epubx`) works locally but breaks
@@ -209,7 +210,7 @@ ai-reader-2/
 │   ├── ai.py             # analyse, save, discussion, summarize
 │   └── settings.py       # provider override, progress, completion
 ├── templates/            # library.html, reader.html, highlights.html
-├── static/               # css + js (reader, library, highlights, panel)
+├── static/               # css + js (reader, library, highlights, panel) + vendor/
 ├── books/                # <slug>/<slug>.epub — the books themselves
 └── tests/                # synthetic fixtures; corpus tests skip when absent
 ```
