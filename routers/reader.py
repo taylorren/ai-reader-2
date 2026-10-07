@@ -176,27 +176,3 @@ def footnote_api(slug: str, chapter_index: int):
         "edges": book.footnotes(chapter_index),
     }
 
-
-@router.get("/api/footnotes/{slug}/{chapter_index}")
-def footnotes_api(slug: str, chapter_index: int):
-    """The chapter's resolved footnote edges.
-
-    SPEC.md: footnotes from edges — the marker's text, the raw href it
-    carries, and the note it resolves to (chapter, path, anchor, text).
-    The reader pops these up without fetching a rendered page. A chapter
-    whose book yields no classified markers (Word-style `①` links, say)
-    comes back with zero edges; its markers keep navigating natively.
-    """
-    from . import BOOKS_DIR, book_cache, get_db
-
-    row = get_db().get_book(slug)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    if not 0 <= chapter_index < book.chapter_count:
-        raise HTTPException(status_code=404, detail="No such chapter")
-    return {
-        "slug": slug,
-        "chapter_index": chapter_index,
-        "edges": book.footnotes(chapter_index),
-    }
