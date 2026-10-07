@@ -151,7 +151,29 @@ class Book:
             return ""
         return self._book.chapters[index].plain_text
 
+    def blocks(self, index: int) -> list[dict]:
+        """The chapter's content blocks: id, kind, text, dom_ids.
+
+        The ids are the library's positional anchors — `{chapter}/b{ordinal}`
+        — so a highlight can name the block it belongs to rather than only
+        the words it selected (SPEC.md principle 5). The served document
+        carries none of these ids, so a reader locates the block by matching
+        text; the id is what is stored.
+        """
+        if self._book is None:
+            return []
+        return [
+            {
+                "id": block.id,
+                "kind": block.kind,
+                "text": block.text,
+                "dom_ids": list(block.attributes.get("dom_ids", ())),
+            }
+            for block in self._book.chapters[index].blocks
+        ]
+
     def footnotes(self, index: int) -> list[dict]:
+
         """The chapter's footnote edges, normalized by the library.
 
         The library recognizes the book's own footnote signals — semantic

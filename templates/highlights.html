@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ book_title }} — 高亮与批注</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🖍️</text></svg>">
+    <link rel="stylesheet" href="/static/css/highlights.css?v={{ asset_version }}">
+</head>
+<body>
+    <div id="highlights-app" data-slug="{{ slug }}">
+        <button class="theme-toggle" @click="toggleTheme" title="切换主题">🌙</button>
+
+        <header class="highlights-header">
+            <a href="/" class="back-link">← 返回图书馆</a>
+            <a href="/read/{{ slug }}" class="back-link">继续阅读 →</a>
+            <h1>{{ book_title }}</h1>
+            <div class="book-meta">全部高亮与批注</div>
+            <div class="stats-bar">
+                <span class="stat-item">📋 {{ stats.fact_check }} 解释说明</span>
+                <span class="stat-item">💡 {{ stats.discussion }} 深入讨论</span>
+                <span class="stat-item">💬 {{ stats.comment }} 个人笔记</span>
+                <span class="stat-item">📝 {{ stats.total }} 全部</span>
+            </div>
+        </header>
+
+        {% if items %}
+        <div class="filter-bar">
+            <button class="filter-btn active" @click="filterItems('all', $event)">全部</button>
+            <button class="filter-btn" @click="filterItems('fact_check', $event)">📋 解释说明</button>
+            <button class="filter-btn" @click="filterItems('discussion', $event)">💡 深入讨论</button>
+            <button class="filter-btn" @click="filterItems('comment', $event)">💬 个人笔记</button>
+            <button class="filter-btn" @click="filterItems('highlight', $event)">🖍️ 高亮</button>
+            <a class="export-btn" href="/highlights/{{ slug }}/export">📥 导出 Markdown</a>
+        </div>
+
+        <div id="highlights-container">
+            {% for item in items %}
+            <article class="highlight-item {{ item.kind }}" data-kind="{{ item.kind }}">
+                <div class="highlight-head">
+                    <span class="highlight-kind">{{ item.kind_label }}</span>
+                    <span class="highlight-chapter">第 {{ item.chapter_index + 1 }} 章</span>
+                    <span class="highlight-date">{{ (item.analysis_created_at or item.created_at)[:19].replace("T", " ") }}</span>
+                </div>
+                <blockquote class="highlight-text">{{ item.selected_text }}</blockquote>
+                {% if item.response %}
+                <div class="analysis-content">{{ item.response_html }}</div>
+                {% endif %}
+                <div class="highlight-actions">
+                    <a class="action-link" href="/read/{{ slug }}/{{ item.chapter_index }}">在书中定位</a>
+                    {% if item.analysis_id %}
+                    <button class="action-link danger" data-analysis-id="{{ item.analysis_id }}"
+                            @click="deleteAnalysis($event)">删除批注</button>
+                    {% else %}
+                    <button class="action-link danger" data-highlight-id="{{ item.id }}"
+                            @click="deleteHighlight($event)">删除高亮</button>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        <div id="no-results" hidden>没有匹配的高亮 (Nothing here)</div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">🖍️</div>
+            <div class="empty-text">还没有任何高亮或批注</div>
+            <div class="empty-subtext">在阅读时选中文字即可添加</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
+    <script src="/static/js/highlights-app.js?v={{ asset_version }}"></script>
+</body>
+</html>

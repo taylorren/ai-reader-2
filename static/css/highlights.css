@@ -1,0 +1,143 @@
+/* The highlights view: a reading record — every highlight and its analyses. */
+
+:root {
+    --bg: #f4f4f9;
+    --panel: #ffffff;
+    --text: #222222;
+    --muted: #777777;
+    --line: #e2e2e8;
+    --accent: #4a7dbf;
+    --danger: #b04a4a;
+}
+
+body.dark-mode {
+    --bg: #141417;
+    --panel: #1f1f24;
+    --text: #e2e2e2;
+    --muted: #999999;
+    --line: #3a3a42;
+    --accent: #7da7d9;
+    --danger: #d98080;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.7;
+}
+
+#highlights-app { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+
+.theme-toggle {
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    padding: 7px 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 1.1em;
+    cursor: pointer;
+    z-index: 10;
+}
+
+.highlights-header { border-bottom: 1px solid var(--line); padding-bottom: 18px; }
+.back-link { color: var(--accent); text-decoration: none; font-size: 0.9em; margin-right: 16px; }
+.back-link:hover { text-decoration: underline; }
+.highlights-header h1 { font-size: 1.5em; margin: 14px 0 4px; }
+.book-meta { color: var(--muted); font-size: 0.9em; }
+
+.stats-bar { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; }
+.stat-item { font-size: 0.88em; color: var(--muted); }
+
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 18px 0;
+}
+
+.filter-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 0.85em;
+    cursor: pointer;
+}
+.filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.export-btn {
+    margin-left: auto;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    font-size: 0.85em;
+}
+
+.highlight-item {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+}
+.highlight-item.fact_check { border-left-color: #d9a441; }
+.highlight-item.discussion { border-left-color: #5a8fd6; }
+.highlight-item.comment { border-left-color: #4fae7a; }
+.highlight-item.highlight { border-left-color: #b06fd0; }
+
+.highlight-head { display: flex; gap: 12px; align-items: baseline; font-size: 0.82em; }
+.highlight-kind { font-weight: 600; color: var(--accent); }
+.highlight-chapter, .highlight-date { color: var(--muted); }
+.highlight-date { margin-left: auto; }
+
+.highlight-text {
+    margin: 10px 0;
+    padding: 8px 12px;
+    border-left: 3px solid var(--line);
+    color: var(--text);
+    font-style: italic;
+}
+
+.analysis-content { font-size: 0.95em; }
+.analysis-content p:first-child { margin-top: 0; }
+.analysis-content code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+.analysis-content pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
+.analysis-content blockquote { border-left: 3px solid var(--line); margin: 8px 0; padding-left: 12px; color: var(--muted); }
+
+.highlight-actions {
+    display: flex;
+    gap: 14px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+.action-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+.action-link:hover { text-decoration: underline; }
+.action-link.danger { color: var(--danger); }
+
+.empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+.empty-icon { font-size: 3.4em; margin-bottom: 12px; }
+.empty-text { font-size: 1.05em; }
+.empty-subtext { font-size: 0.9em; }
+#no-results { text-align: center; color: var(--muted); padding: 24px; }

@@ -414,3 +414,162 @@ body.dark-mode #toc-list a.current { color: #f0a370; background: rgba(240, 163, 
     background: var(--bar);
     border-top: 1px solid var(--line);
 }
+
+/* ---- The AI panel, context menu and toast ---- */
+
+.context-menu {
+    position: fixed;
+    z-index: 40;
+    min-width: 160px;
+    padding: 6px;
+    background: var(--bar);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+    font-size: 0.88em;
+}
+.context-menu-item { padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.context-menu-item:hover { background: var(--accent-soft); }
+.context-menu-separator { height: 1px; margin: 5px 4px; background: var(--line); }
+
+.ai-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 35;
+    display: flex;
+    flex-direction: column;
+    width: min(420px, 92vw);
+    height: 100vh;
+    padding: 14px 16px 18px;
+    background: var(--bar);
+    border-left: 1px solid var(--line);
+    box-shadow: -8px 0 28px rgba(0, 0, 0, 0.16);
+    overflow-y: auto;
+}
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    font-size: 1.02em;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.panel-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0;
+}
+
+.panel-link { color: var(--accent); text-decoration: none; font-size: 0.85em; }
+.panel-link:hover { text-decoration: underline; }
+
+.panel-selected {
+    margin: 0 0 12px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-style: italic;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.panel-body { font-size: 0.92em; line-height: 1.75; }
+.panel-body p:first-child { margin-top: 0; }
+.panel-body pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
+.panel-body code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+
+.loading, .panel-hint { color: var(--muted); font-style: italic; padding: 8px 0; }
+.panel-error { color: var(--danger); }
+
+.comment-input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    resize: vertical;
+}
+
+.discussion-log { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
+.discussion-message {
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.9em;
+    line-height: 1.7;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+.discussion-message.user { background: var(--accent-soft); align-self: flex-end; }
+.discussion-message.assistant { background: var(--bg); border: 1px solid var(--line); }
+
+.discussion-input-row { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.discussion-input-row textarea {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    resize: vertical;
+}
+
+.panel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+.saved-analysis { border-bottom: 1px dashed var(--line); padding-bottom: 10px; margin-bottom: 10px; }
+
+.btn {
+    padding: 7px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bar);
+    color: var(--text);
+    font-size: 0.88em;
+    cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+
+.toggle-panel-btn {
+    position: fixed;
+    right: 18px;
+    bottom: 74px;
+    z-index: 30;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.95em;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+}
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%) translateY(12px);
+    z-index: 50;
+    padding: 9px 16px;
+    border-radius: 999px;
+    background: rgba(34, 34, 34, 0.92);
+    color: #fff;
+    font-size: 0.88em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+}
+.toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: rgba(176, 74, 74, 0.95); }

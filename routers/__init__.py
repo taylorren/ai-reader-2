@@ -94,6 +94,24 @@ def get_db():
     return _db
 
 
+# ---- The AI service ----
+
+# Runtime settings, mirroring ai-reader: a provider override chosen from the
+# settings panel, kept in memory (a restart returns to the .env default).
+_runtime_settings = {"provider_override": None}
+_ai_service = None
+
+
+def get_ai_service():
+    """The shared AIService singleton, created on first use."""
+    global _ai_service
+    if _ai_service is None:
+        from ai_service import AIService
+
+        _ai_service = AIService()
+    return _ai_service
+
+
 # ---- Slug: ai-reader's algorithm, unchanged ----
 
 _INVALID_FILENAME_CHARS = '<>:"/\\|?*'

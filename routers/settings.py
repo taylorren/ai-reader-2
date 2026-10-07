@@ -1,22 +1,56 @@
 """Settings routes: provider override, progress, completion.
 
-Landed so far:
+Landed:
 
-    POST /api/books/{slug}/completion   mark a book completed or not
-    POST /api/progress                  reading position (chapter + percent)
-
-Planned, per SPEC.md:
-
-    GET  /api/settings     provider override status
-    POST /api/settings     provider override
+    GET  /api/settings                   provider override + default
+    POST /api/settings                   set or clear the override
+    POST /api/progress                   reading position (chapter + percent)
+    POST /api/books/{slug}/completion    mark a book completed or not
 """
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from ai_service import PROVIDERS
+
+from . import _runtime_settings, get_db
+
 router = APIRouter()
+
+
+class SettingsUpdate(BaseModel):
+    """Runtime settings. A null override clears it and returns to the default."""
+    provider_override: str | None = None
+
+
+@router.get("/api/settings")
+def get_settings():
+    """The current provider override and the .env default behind it."""
+    return {
+        "provider_override": _runtime_settings["provider_override"],
+        "default_provider": os.getenv("OLLAMA_DEFAULT_PROVIDER", "ollama_cloud"),
+        "status": "success",
+    }
+
+
+@router.post("/api/settings")
+def update_settings(settings: SettingsUpdate):
+    """Set the provider override, or clear it with a null value."""
+    if settings.provider_override is None:
+        _runtime_settings["provider_override"] = None
+    else:
+        provider = settings.provider_override.lower()
+        if provider not in PROVIDERS:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid provider. Must be 'ollama' or 'ollama_cloud'")
+        _runtime_settings["provider_override"] = provider
+    return {"provider_override": _runtime_settings["provider_override"],
+            "status": "success"}
 
 
 class ProgressUpdate(BaseModel):
@@ -24,6 +58,7 @@ class ProgressUpdate(BaseModel):
     chapter_index: int
     scroll_percent: float = 0.0
     anchor: str | None = None
+
 
 
 @router.post("/api/books/{slug}/completion")

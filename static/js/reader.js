@@ -44,6 +44,7 @@ function load(index, anchor) {
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
     saveProgress(0);
     mark();
+    ReaderPanel.setChapter(index);
 }
 
 function mark() {
@@ -122,6 +123,17 @@ and restores the publisher's design untouched. */
 
 const READER_STYLE_ID = "reader-style";
 
+// Painted highlights live in the frame's document, so their colours must be
+// injected there too — and they stay visible in 书本 mode, where the book's
+// own CSS otherwise rules.
+const HIGHLIGHT_CSS = `
+mark.reader-highlight { cursor: pointer; border-radius: 2px; color: inherit; }
+mark.reader-highlight.hl-fact_check { background: rgba(217, 164, 65, 0.42); }
+mark.reader-highlight.hl-discussion { background: rgba(90, 143, 214, 0.38); }
+mark.reader-highlight.hl-comment { background: rgba(79, 174, 122, 0.38); }
+mark.reader-highlight.hl-highlight { background: rgba(176, 111, 208, 0.34); }
+`;
+
 function framePaperCSS() {
     const dark = state.theme === "dark";
     const paper = dark
@@ -172,11 +184,12 @@ function applyFrameStyle() {
         (doc.head || doc.documentElement).appendChild(style);
     }
     if (state.mode === "book") {
-        // The publisher's design, untouched: no injected stylesheet.
-        style.textContent = "";
+        // The publisher's design, untouched: no paper stylesheet — but the
+        // painted highlights still need their colours.
+        style.textContent = HIGHLIGHT_CSS;
         return;
     }
-    style.textContent = framePaperCSS();
+    style.textContent = framePaperCSS() + HIGHLIGHT_CSS;
 }
 
 function applyTheme() {
@@ -437,10 +450,13 @@ frame.addEventListener("load", () => {
     } catch (error) { /* opaque origin: nothing to sync */ }
     wireMarkers();  // word-convention markers wire immediately
     loadEdges();    // library-classified edges wire when they arrive
+    ReaderPanel.onFrameLoad();  // selection + saved highlights for this chapter
 });
 
 /* ---- init ---- */
 
+ReaderPanel.setBook(BOOK.slug);
+ReaderPanel.init();
 renderToc(BOOK.toc, tocList);
 applySidebar();
 applyTheme();
@@ -452,4 +468,5 @@ mark();
 // catches any load that completed in between.
 wireMarkers();
 loadEdges();
+ReaderPanel.onFrameLoad();
 setTimeout(wireMarkers, 300);

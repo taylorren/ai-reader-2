@@ -63,6 +63,47 @@
                         src="{{ initial_src }}" title="{{ title }}"></iframe>
             </main>
             <div id="footnote-popup" class="footnote-popup"></div>
+
+            <!-- Selection actions: the shell's menu over the frame. -->
+            <div id="context-menu" class="context-menu" hidden>
+                <div class="context-menu-item" data-action="fact_check">📋 解释说明</div>
+                <div class="context-menu-item" data-action="discussion">💡 深入讨论</div>
+                <div class="context-menu-item" data-action="comment">💬 添加笔记</div>
+                <div class="context-menu-separator"></div>
+                <div class="context-menu-item" data-action="copy">📄 复制文本</div>
+            </div>
+
+            <!-- The AI panel: analysis, discussion, notes. -->
+            <aside id="ai-panel" class="ai-panel" hidden>
+                <div class="panel-head">
+                    <span id="panel-title">AI 分析</span>
+                    <button id="panel-close" class="icon-btn" title="关闭">×</button>
+                </div>
+                <div class="panel-tools">
+                    <a id="panel-highlights-link" class="panel-link"
+                       href="/highlights/{{ slug }}">全部高亮 ↗</a>
+                    <select id="provider-select" class="font-select" title="AI 提供方">
+                        <option value="ollama">本地 Ollama</option>
+                        <option value="ollama_cloud">云端 Ollama</option>
+                    </select>
+                </div>
+                <blockquote id="panel-selected" class="panel-selected"></blockquote>
+                <div id="panel-body" class="panel-body"></div>
+                <div id="discussion-log" class="discussion-log" hidden></div>
+                <div id="discussion-input-row" class="discussion-input-row" hidden>
+                    <textarea id="discussion-input" rows="2" placeholder="继续提问…"></textarea>
+                    <button id="discussion-send" class="btn">发送</button>
+                </div>
+                <div class="panel-actions">
+                    <button id="panel-save" class="btn primary" hidden>保存到数据库</button>
+                    <button id="panel-edit" class="btn" hidden>编辑笔记</button>
+                    <button id="panel-summarize" class="btn" hidden>总结讨论</button>
+                    <button id="panel-delete" class="btn danger" hidden>删除高亮</button>
+                </div>
+            </aside>
+            <button id="toggle-panel" class="toggle-panel-btn" hidden>AI</button>
+            <div id="toast" class="toast"></div>
+
             <footer class="reader-footer">
                 <nav class="chapter-nav bottom" aria-label="章节">
                     <button id="bottom-prev" class="nav-btn" title="←">‹ 上一章</button>
@@ -70,8 +111,10 @@
                     <button id="bottom-next" class="nav-btn" title="→">下一章 ›</button>
                 </nav>
             </footer>
-            <div id="footnote-popup" class="footnote-popup"></div>
             <script>const BOOK = {{ book_data | tojson }};</script>
+            <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+            <script src="/static/js/panel.js?v={{ asset_version }}"></script>
             <script src="/static/js/reader.js?v={{ asset_version }}"></script>
             {% endif %}
         </div>

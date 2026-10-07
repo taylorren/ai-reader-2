@@ -11,10 +11,8 @@ Landed:
     GET /api/book/{slug}          spine + toc + metadata as JSON
     GET /api/footnotes/{slug}/{i} resolved footnote edges (note text and
                                   target path included, for popups)
-
-Planned, per SPEC.md:
-
-    GET /api/text/{slug}/{chapter_index}       plain_text — AI context (P4)
+    GET /api/text/{slug}/{i}      plain_text and the chapter's block ids —
+                                  AI context, and the anchors highlights use
 """
 
 from __future__ import annotations
@@ -30,6 +28,12 @@ from . import BASE_DIR, get_asset_version
 router = APIRouter()
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+# The block kinds worth anchoring a highlight to: prose the reader sees as
+# text. Lists, tables and figures are skipped — their inner text is not a
+# single selectable run in the served document.
+ANCHOR_KINDS = ("paragraph", "heading", "quote", "preformatted", "definition")
+
 
 
 def content_type(media_type: str) -> str:
@@ -175,4 +179,35 @@ def footnote_api(slug: str, chapter_index: int):
         "chapter_index": chapter_index,
         "edges": book.footnotes(chapter_index),
     }
+
+
+@router.get("/api/text/{slug}/{chapter_index}")
+def chapter_text_api(slug: str, chapter_index: int):
+    """A chapter's plain text and its anchorable blocks.
+
+    The text is the AI's context and the word count's source; the blocks are
+    what a highlight anchors to. Only prose kinds come back — a list or table
+    is not a single selectable run in the served document, so a highlight in
+    one is located by its selected text alone.
+    """
+    from . import BOOKS_DIR, book_cache, get_db
+
+    row = get_db().get_book(slug)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
+    if not 0 <= chapter_index < book.chapter_count:
+        raise HTTPException(status_code=404, detail="No such chapter")
+    text = book.chapter_text(chapter_index)
+    blocks = [block for block in book.blocks(chapter_index)
+              if block["kind"] in ANCHOR_KINDS and block["text"].strip()]
+    return {
+        "slug": slug,
+        "chapter_index": chapter_index,
+        "chapter_path": book.spine[chapter_index],
+        "text": text,
+        "word_count": len(text),
+        "blocks": blocks,
+    }
+
 

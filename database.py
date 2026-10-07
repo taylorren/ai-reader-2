@@ -189,6 +189,124 @@ class Database:
         finally:
             conn.close()
 
+    def highlights_for_chapter(self, book_id: str, chapter_index: int) -> list[dict]:
+        """A chapter's highlights, oldest first — the order they were made."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM highlights WHERE book_id = ? AND chapter_index = ? "
+                "ORDER BY id", (book_id, chapter_index)
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_highlight(self, highlight_id: int) -> dict | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM highlights WHERE id = ?", (highlight_id,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def delete_highlight(self, highlight_id: int) -> None:
+        """Delete a highlight and every analysis attached to it."""
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM ai_analyses WHERE highlight_id = ?",
+                         (highlight_id,))
+            conn.execute("DELETE FROM highlights WHERE id = ?", (highlight_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    # -- analyses --------------------------------------------------------------
+
+    def save_analysis(self, highlight_id: int, analysis_type: str, prompt: str,
+                      response: str) -> int:
+        conn = self._connect()
+        try:
+            cursor = conn.execute("""
+                INSERT INTO ai_analyses (highlight_id, analysis_type, prompt,
+                                         response, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (highlight_id, analysis_type, prompt, response,
+                  datetime.now().isoformat()))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def analyses_for_highlight(self, highlight_id: int) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM ai_analyses WHERE highlight_id = ? ORDER BY id",
+                (highlight_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def analyses_for_book(self, book_id: str) -> list[dict]:
+        """Every analysis for a book, each carrying its highlight's fields."""
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT a.*, h.book_id AS book_id, h.chapter_index AS chapter_index,
+                       h.chapter_path AS chapter_path, h.selected_text AS selected_text
+                FROM ai_analyses AS a
+                JOIN highlights AS h ON h.id = a.highlight_id
+                WHERE h.book_id = ?
+                ORDER BY a.id
+            """, (book_id,)).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_analysis(self, analysis_id: int) -> dict | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM ai_analyses WHERE id = ?", (analysis_id,)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def update_analysis(self, analysis_id: int, response: str) -> None:
+        """Edit an analysis' response in place (an edited note)."""
+        conn = self._connect()
+        try:
+            conn.execute("UPDATE ai_analyses SET response = ? WHERE id = ?",
+                         (response, analysis_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_analysis(self, analysis_id: int) -> None:
+        """Delete one analysis. The highlight stays unless it was the last one."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT highlight_id FROM ai_analyses WHERE id = ?", (analysis_id,)
+            ).fetchone()
+            if row is None:
+                return
+            highlight_id = row["highlight_id"]
+            conn.execute("DELETE FROM ai_analyses WHERE id = ?", (analysis_id,))
+            remaining = conn.execute(
+                "SELECT COUNT(*) AS n FROM ai_analyses WHERE highlight_id = ?",
+                (highlight_id,)).fetchone()["n"]
+            if remaining == 0:
+                conn.execute("DELETE FROM highlights WHERE id = ?", (highlight_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+
     # -- progress ------------------------------------------------------------
 
     def get_progress(self, book_id: str) -> dict | None:

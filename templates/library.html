@@ -79,6 +79,7 @@
                                 <div class="menu-wrap">
                                     <button class="menu-btn" @click.stop="toggleMenu($event)">⋮</button>
                                     <div class="dropdown-menu">
+                                        <a class="dropdown-item" href="/highlights/{{ book.slug }}">高亮与批注</a>
                                         <div class="dropdown-item" @click.stop="toggleCompleted($event)">
                                             {% if book.is_completed %}Mark as Incomplete{% else %}Mark as Completed{% endif %}
                                         </div>
