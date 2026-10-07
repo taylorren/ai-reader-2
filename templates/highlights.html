@@ -13,7 +13,7 @@
 
         <header class="highlights-header">
             <a href="/" class="back-link">← 返回图书馆</a>
-            <a href="/read/{{ slug }}" class="back-link">继续阅读 →</a>
+            <a href="/read/{{ slug | urlencode }}" class="back-link">继续阅读 →</a>
             <h1>{{ book_title }}</h1>
             <div class="book-meta">全部高亮与批注</div>
             <div class="stats-bar">
@@ -31,7 +31,7 @@
             <button class="filter-btn" @click="filterItems('discussion', $event)">💡 深入讨论</button>
             <button class="filter-btn" @click="filterItems('comment', $event)">💬 个人笔记</button>
             <button class="filter-btn" @click="filterItems('highlight', $event)">🖍️ 高亮</button>
-            <a class="export-btn" href="/highlights/{{ slug }}/export">📥 导出 Markdown</a>
+            <a class="export-btn" href="/highlights/{{ slug | urlencode }}/export">📥 导出 Markdown</a>
         </div>
 
         <div id="highlights-container">
@@ -47,7 +47,8 @@
                 <div class="analysis-content">{{ item.response_html }}</div>
                 {% endif %}
                 <div class="highlight-actions">
-                    <a class="action-link" href="/read/{{ slug }}/{{ item.chapter_index }}">在书中定位</a>
+                    <a class="action-link"
+                       href="/read/{{ slug | urlencode }}/{{ item.chapter_index }}?highlight={{ item.id }}">在书中定位</a>
                     {% if item.analysis_id %}
                     <button class="action-link danger" data-analysis-id="{{ item.analysis_id }}"
                             @click="deleteAnalysis($event)">删除批注</button>

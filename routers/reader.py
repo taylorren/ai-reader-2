@@ -132,6 +132,8 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
                 "spine": list(book.spine),
                 "toc": book.toc_json(),
                 "saved_percent": saved_percent,
+                # ?highlight=<id> — a "在书中定位" link; the shell scrolls to it.
+                "target_highlight": request.query_params.get("highlight", ""),
             },
         },
     )

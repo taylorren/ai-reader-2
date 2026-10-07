@@ -132,6 +132,10 @@ mark.reader-highlight.hl-fact_check { background: rgba(217, 164, 65, 0.42); }
 mark.reader-highlight.hl-discussion { background: rgba(90, 143, 214, 0.38); }
 mark.reader-highlight.hl-comment { background: rgba(79, 174, 122, 0.38); }
 mark.reader-highlight.hl-highlight { background: rgba(176, 111, 208, 0.34); }
+mark.reader-highlight.flash { animation: reader-hl-flash 0.8s ease 3; }
+@keyframes reader-hl-flash {
+  50% { background: rgba(255, 208, 84, 0.9); }
+}
 `;
 
 function framePaperCSS() {

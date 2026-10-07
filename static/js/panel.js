@@ -94,10 +94,21 @@ window.ReaderPanel = (function () {
     }
 
     function closePanel() {
-        if (state.busy) { toast("AI 正在思考中，请稍候…"); return; }
         el("ai-panel").hidden = true;
         el("toggle-panel").hidden = false;
         resetPanel();
+    }
+
+    // X, ESC and click-outside all land here: a close while the AI is thinking
+    // would lose the in-flight result, so it is refused with a toast instead
+    // (the reference reader's rule).
+    function requestClose() {
+        if (state.busy) {
+            const message = "AI 正在思考中，请稍候…";
+            if (el("toast").textContent !== message) toast(message);
+            return;
+        }
+        closePanel();
     }
 
     function resetPanel() {
@@ -140,7 +151,7 @@ window.ReaderPanel = (function () {
     P.init = function () {
         el("provider-select").addEventListener("change",
             (event) => setProvider(event.currentTarget.value));
-        el("panel-close").addEventListener("click", closePanel);
+        el("panel-close").addEventListener("click", () => requestClose());
         el("toggle-panel").addEventListener("click", () => openPanel());
         el("panel-save").addEventListener("click", () => saveCurrent());
         el("panel-delete").addEventListener("click", () => deleteCurrent());
@@ -156,8 +167,23 @@ window.ReaderPanel = (function () {
         document.addEventListener("click", (event) => {
             if (!event.target.closest("#context-menu")) hideContextMenu();
         });
+        // ESC closes the context menu and the panel — unless the reader is
+        // typing into the discussion box or a note (ai-reader's rule).
         document.addEventListener("keydown", (event) => {
-            if (event.key === "Escape") { hideContextMenu(); }
+            const typing = ["TEXTAREA", "INPUT"].includes(event.target.tagName);
+            if (event.key !== "Escape" || typing) return;
+            const menuOpen = !el("context-menu").hidden;
+            if (menuOpen || !el("ai-panel").hidden) {
+                event.preventDefault();
+                hideContextMenu();
+                requestClose();
+            }
+        });
+        // A click outside the panel dismisses it, as in the reference reader.
+        document.addEventListener("mousedown", (event) => {
+            if (el("ai-panel").hidden) return;
+            const inside = event.target.closest("#ai-panel, #context-menu, #toggle-panel");
+            if (!inside) requestClose();
         });
         loadSettings();
     };
@@ -533,32 +559,61 @@ window.ReaderPanel = (function () {
         return null;
     }
 
+    // A whitespace-insensitive index: the value, plus the source offset each
+    // of its characters came from. A row migrated from the old app carries
+    // text that app extracted, whose spacing need not match this DOM's —
+    // matching the normalised form is what lets those highlights paint.
+    function normalizedIndex(text) {
+        let value = "";
+        const map = [];
+        let lastWasSpace = false;
+        for (let i = 0; i < text.length; i++) {
+            if (/\s/.test(text[i])) {
+                if (value && !lastWasSpace) { value += " "; map.push(i); lastWasSpace = true; }
+            } else {
+                value += text[i];
+                map.push(i);
+                lastWasSpace = false;
+            }
+        }
+        if (lastWasSpace) { value = value.slice(0, -1); map.pop(); }
+        return { value, map };
+    }
+
+    function offsetToPoint(nodes, offset) {
+        let position = 0;
+        for (const node of nodes) {
+            const length = node.nodeValue.length;
+            if (offset <= position + length) {
+                return { node, offset: offset - position };
+            }
+            position += length;
+        }
+        return null;
+    }
+
     function wrapText(doc, root, text, highlight) {
         const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         const nodes = [];
         let node;
         while ((node = walker.nextNode())) nodes.push(node);
         const full = nodes.map((item) => item.nodeValue).join("");
-        const at = full.indexOf(text);
-        if (at < 0) return false;
-        let start = null, startOffset = 0, end = null, endOffset = 0, pos = 0;
-        for (const item of nodes) {
-            const length = item.nodeValue.length;
-            if (start === null && at < pos + length) {
-                start = item;
-                startOffset = at - pos;
-            }
-            if (start !== null && at + text.length <= pos + length) {
-                end = item;
-                endOffset = at + text.length - pos;
-                break;
-            }
-            pos += length;
+        let at = full.indexOf(text);
+        let length = text.length;
+        if (at < 0) {
+            const haystack = normalizedIndex(full);
+            const needle = normalizedIndex(text).value;
+            const found = needle ? haystack.value.indexOf(needle) : -1;
+            if (found < 0) return false;
+            at = haystack.map[found];
+            length = haystack.map[found + needle.length - 1] + 1 - at;
         }
+        const start = offsetToPoint(nodes, at);
+        const end = offsetToPoint(nodes, at + length);
         if (!start || !end) return false;
         const range = doc.createRange();
-        range.setStart(start, startOffset);
-        range.setEnd(end, endOffset);
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
         const mark = doc.createElement("mark");
         mark.className = "reader-highlight hl-" + (highlight.kind || "highlight");
         mark.dataset.highlightId = highlight.id;
@@ -592,7 +647,22 @@ window.ReaderPanel = (function () {
             const blocks = await blocksFor(state.index);
             const highlights = await highlightsFor(state.index);
             paint(blocks, highlights);
+            revealTarget();
         } catch (error) { /* the chapter may have moved on */ }
+    }
+
+    // A "在书中定位" link arrives as ?highlight=<id>. Once the mark is painted,
+    // scroll it into view and flash it — the point of the link is to land on
+    // the passage, not merely on the chapter that holds it.
+    function revealTarget() {
+        const target = window.BOOK && window.BOOK.target_highlight;
+        if (!target) return;
+        const doc = frameEl().contentDocument;
+        const mark = doc && doc.querySelector(`mark[data-highlight-id="${target}"]`);
+        if (!mark) return;
+        mark.scrollIntoView({ behavior: "smooth", block: "center" });
+        mark.classList.add("flash");
+        setTimeout(() => mark.classList.remove("flash"), 2400);
     }
 
     function showHighlight(highlightId) {

@@ -175,6 +175,16 @@ def test_progress_rejects_a_bad_chapter_and_unknown_book(
     assert unknown.status_code == 404
 
 
+def test_the_shell_carries_a_highlight_deep_link(isolated_client, isolated):
+    """?highlight=<id> reaches the shell, so "在书中定位" can scroll to it."""
+    slug = upload(isolated_client, isolated)
+    body = isolated_client.get(f"/read/{slug}/0?highlight=7").text
+    assert '"target_highlight": "7"' in body or '"target_highlight":"7"' in body
+    # Without the parameter the shell carries an empty target.
+    plain = isolated_client.get(f"/read/{slug}/0").text
+    assert '"target_highlight": ""' in plain or '"target_highlight":""' in plain
+
+
 def test_an_unsupported_book_gets_a_named_shell(isolated_client, isolated):
     slug = upload(isolated_client, isolated, write_drm_epub, "locked.epub")
     response = isolated_client.get(f"/read/{slug}/0")

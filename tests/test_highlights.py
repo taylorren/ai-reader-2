@@ -99,6 +99,20 @@ def test_the_highlights_view_renders_and_sanitises(isolated_client, isolated, up
     assert isolated_client.get("/highlights/ghost").status_code == 404
 
 
+def test_the_highlights_view_deep_links_to_each_highlight(isolated_client,
+                                                          isolated, upload):
+    """Each 在书中定位 link names the highlight, so the shell can scroll to it."""
+    from urllib.parse import quote
+
+    slug = upload()
+    highlight_id = make_highlight(isolated_client, slug)
+    body = isolated_client.get(f"/highlights/{slug}").text
+    # The slug is percent-encoded in the href (it may be CJK or carry spaces)…
+    assert quote(slug, safe="") in body
+    # …and the chapter link carries the highlight id.
+    assert f"/{quote(slug, safe='')}/0?highlight={highlight_id}" in body
+
+
 def test_the_highlights_export_is_markdown(isolated_client, isolated, upload):
     slug = upload()
     highlight_id = make_highlight(isolated_client, slug)

@@ -32,6 +32,11 @@ body.dark-mode {
 
 * { box-sizing: border-box; }
 
+/* `hidden` must win over the layout `display` rules below (the panel is a
+   flex column; the discussion log/input row are flex too). Without this the
+   X button sets `hidden` and nothing moves. */
+[hidden] { display: none !important; }
+
 html, body {
     margin: 0;
     height: 100%;
