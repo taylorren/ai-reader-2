@@ -111,22 +111,29 @@ window.ReaderPanel = (function () {
         if (title) el("panel-title").textContent = title;
     }
 
-    function closePanel() {
+    // `keepState` hides the panel without wiping what it holds. It is used when
+    // a dismiss lands while the AI is still thinking: the reply is on its way,
+    // so it is kept (and shown when the panel is reopened) rather than thrown
+    // away with the reset.
+    function closePanel(keepState) {
         el("ai-panel").hidden = true;
         el("toggle-panel").hidden = false;
-        resetPanel();
+        if (!keepState) resetPanel();
     }
 
-    // X, ESC and click-outside all land here: a close while the AI is thinking
-    // would lose the in-flight result, so it is refused with a toast instead
-    // (the reference reader's rule).
-    function requestClose() {
-        if (state.busy) {
+    // X and ESC are deliberate closes: a close while the AI is thinking would
+    // lose the in-flight result, so those are refused with a toast instead (the
+    // reference reader's rule). Click-outside is a *dismiss* — the reader
+    // clicking back into the book to keep reading — and must always get the
+    // panel out of the way, so it passes `force`; the reply is kept rather than
+    // discarded.
+    function requestClose(force) {
+        if (state.busy && !force) {
             const message = "AI 正在思考中，请稍候…";
             if (el("toast").textContent !== message) toast(message);
             return;
         }
-        closePanel();
+        closePanel(!!force && state.busy);
     }
 
     function resetPanel() {
@@ -155,8 +162,15 @@ window.ReaderPanel = (function () {
     function setBusy(busy) {
         state.busy = busy;
         el("discussion-send").disabled = busy;
+        const body = el("panel-body");
         if (busy) {
-            el("panel-body").innerHTML = '<div class="loading">AI 正在思考…</div>';
+            body.innerHTML = '<div class="loading">AI 正在思考…</div>';
+        } else if (body.querySelector(".loading")) {
+            // The placeholder is still there: the request finished without
+            // putting anything here (a discussion reply renders into the log,
+            // not the body), so clear it rather than leave a stale "thinking"
+            // line sitting above the conversation.
+            body.innerHTML = "";
         }
     }
 
@@ -198,10 +212,12 @@ window.ReaderPanel = (function () {
             }
         });
         // A click outside the panel dismisses it, as in the reference reader.
+        // `true` = dismiss, never refused: even while the AI is thinking, the
+        // reader must be able to click back into the book and keep reading.
         document.addEventListener("mousedown", (event) => {
             if (el("ai-panel").hidden) return;
             const inside = event.target.closest("#ai-panel, #context-menu, #toggle-panel");
-            if (!inside) requestClose();
+            if (!inside) requestClose(true);
         });
         loadSettings();
     };
@@ -293,15 +309,16 @@ window.ReaderPanel = (function () {
         // The panel is a fixed overlay in the *shell* document, so a press
         // inside the book is always outside it — but the frame is its own
         // event tree, and the shell's click-outside listener never sees these
-        // presses. Close here instead (requestClose, so the in-flight-analysis
-        // rule holds). A press on a painted highlight is the exception: that
-        // highlight's own click handler opens the panel for it, so closing
-        // first would only flicker — and could wipe an analysis in flight.
+        // presses. Dismiss here instead: `true` so a press back into the book
+        // always closes the panel, even while the AI is thinking (the reply is
+        // kept, not lost). A press on a painted highlight is the exception:
+        // that highlight's own click handler opens the panel for it, so closing
+        // first would only flicker.
         doc.addEventListener("mousedown", (event) => {
             if (el("ai-panel").hidden) return;
             const target = event.target;
             if (target.closest && target.closest("mark.reader-highlight")) return;
-            requestClose();
+            requestClose(true);
         });
         doc.addEventListener("mouseup", async (event) => {
             const selection = await computeSelection();
