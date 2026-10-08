@@ -1,7 +1,7 @@
 # ai-reader-2
 
 A self-hosted EPUB reader with AI-assisted annotation, built on
-[epubx](../epubx). It renders the book the publisher shipped, and stores nothing
+[epubx](https://pypi.org/project/epub-extended/). It renders the book the publisher shipped, and stores nothing
 about a book that the book does not already say.
 
 **Design: [SPEC.md](SPEC.md).** The previous implementation, `ai-reader`, is a
