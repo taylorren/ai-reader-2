@@ -156,6 +156,78 @@ def write_counting_epub(path) -> Path:
     return Path(path)
 
 
+# One chapter, and a nav that names two sections *inside* it. epubx strips the
+# fragment from the nav href (nav.py), so all three TOC entries reach the shell
+# with the same `href` and differ only in `anchor` — the shape that stranded the
+# reader's TOC highlight on the chapter's own entry.
+SECTIONED_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Sectioned Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:sectioned-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+SECTIONED_NAV = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Contents</title></head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <ol>
+      <li><a href="ch1.xhtml">Sectioned Book</a>
+        <ol>
+          <li><a href="ch1.xhtml#sec-a">First Section</a></li>
+          <li><a href="ch1.xhtml#sec-b">Second Section</a></li>
+        </ol>
+      </li>
+    </ol>
+  </nav>
+</body>
+</html>
+"""
+
+SECTIONED_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Sectioned Book</title></head>
+<body>
+  <h1 id="top">Sectioned Book</h1>
+  <p>The chapter opens with a paragraph of its own, long enough that the text
+     detector sees a real book and not a page of pictures, and it keeps going
+     until the threshold is comfortably behind it.</p>
+  <h2 id="sec-a">First Section</h2>
+  <p>The first section's prose lives between its heading and the next one, so a
+     reader scrolling through the chapter passes it in the order the contents
+     names.</p>
+  <h2 id="sec-b">Second Section</h2>
+  <p>The second section follows, and its heading is the last one in the
+     document — the deepest point a reader can reach in this chapter.</p>
+</body>
+</html>
+"""
+
+
+def write_sectioned_epub(path) -> Path:
+    """A book whose contents names sections inside its single chapter."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", SECTIONED_OPF)
+        zf.writestr("OEBPS/nav.xhtml", SECTIONED_NAV)
+        zf.writestr("OEBPS/ch1.xhtml", SECTIONED_CHAPTER)
+    return Path(path)
+
+
 # Real content DRM, modelled on epubx's fixture: an EncryptedKey means a
 # licence is in play, and epubx names the book `unsupported` at open.
 DRM_ENCRYPTION = """<?xml version="1.0" encoding="UTF-8"?>

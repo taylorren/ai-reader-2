@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fixtures import write_drm_epub, write_epub  # noqa: E402
+from fixtures import write_drm_epub, write_epub, write_sectioned_epub  # noqa: E402
 
 
 def upload(client, isolated, builder=write_epub, name="fixture.epub"):
@@ -74,6 +74,23 @@ def test_the_shell_serves_the_books_own_document(isolated_client, isolated):
     # The shell hands the spine and TOC to its script.
     assert "OEBPS/ch2.xhtml" in body
     assert '"label": "Chapter Two"' in body or '"label":"Chapter Two"' in body
+
+
+def test_the_shell_hands_over_the_toc_anchors(isolated_client, isolated):
+    """The TOC highlight follows the heading, not merely the chapter. Sections
+    named inside one document share the chapter's href, so the shell must carry
+    the fragment (`anchor`) for reader.js to tell those entries apart — without
+    it every one of them looks like the chapter's own entry."""
+    slug = upload(isolated_client, isolated, write_sectioned_epub,
+                  "sectioned.epub")
+    chapter = isolated_client.get(f"/api/book/{slug}").json()["toc"][0]
+    assert chapter["href"] == "OEBPS/ch1.xhtml" and chapter["anchor"] is None
+    assert [n["anchor"] for n in chapter["children"]] == ["sec-a", "sec-b"]
+
+    # The same entries reach the reading shell itself.
+    body = isolated_client.get(f"/read/{slug}/0").text
+    assert '"anchor": "sec-a"' in body or '"anchor":"sec-a"' in body
+    assert '"anchor": "sec-b"' in body or '"anchor":"sec-b"' in body
 
 
 def test_the_shell_of_a_later_chapter(isolated_client, isolated):

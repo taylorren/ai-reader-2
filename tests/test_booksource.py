@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fixtures import write_epub  # noqa: E402
+from fixtures import write_epub, write_sectioned_epub  # noqa: E402
 
 from booksource import Book  # noqa: E402
 
@@ -50,6 +50,26 @@ def test_toc_json_is_the_books_contents(book):
         ("Chapter Two", "OEBPS/ch2.xhtml"),
     ]
     assert all(n["children"] == [] for n in tree)
+
+
+def test_toc_keeps_a_sections_fragment_beside_its_chapter(tmp_path):
+    """A section named inside a chapter shares that chapter's href: epubx strips
+    the fragment from `href` and hands it over as `anchor`. The reader tells the
+    entries apart by that fragment, so the split must survive into toc_json."""
+    opened = Book.open(write_sectioned_epub(tmp_path / "sectioned.epub"))
+    try:
+        tree = opened.toc_json()
+    finally:
+        opened.close()
+
+    chapter = tree[0]
+    assert chapter["label"] == "Sectioned Book"
+    assert chapter["href"] == "OEBPS/ch1.xhtml"
+    assert chapter["anchor"] is None  # the chapter's own entry names no section
+    assert [(n["href"], n["anchor"]) for n in chapter["children"]] == [
+        ("OEBPS/ch1.xhtml", "sec-a"),
+        ("OEBPS/ch1.xhtml", "sec-b"),
+    ]
 
 
 def test_cover_path_points_into_the_book_itself(book):

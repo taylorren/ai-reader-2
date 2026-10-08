@@ -44,9 +44,16 @@ function fileURL(path, anchor) {
     return prefix + encoded + (anchor ? "#" + encodeURIComponent(anchor) : "");
 }
 
+// The heading the reader asked for but the frame has not reached yet. A TOC
+// click changes `frame.src` while the old document is still on screen, so the
+// in-view heading cannot be measured at that instant: this carries the choice
+// until the new chapter's `load` lands — or the reader scrolls away from it.
+let pendingAnchor = null;
+
 function load(index, anchor) {
     index = Math.max(0, Math.min(BOOK.spine.length - 1, index));
     BOOK.index = index;
+    pendingAnchor = anchor || null;
     frame.src = fileURL(BOOK.spine[index], anchor);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
     saveProgress(0);
@@ -64,13 +71,66 @@ function mark() {
     // progress — scroll percent, resume — lands in P4 with the database.
     history.replaceState(null, "",
         "/read/" + encodeURIComponent(BOOK.slug) + "/" + BOOK.index);
-    const current = tocList.querySelector("a.current");
-    if (current) current.classList.remove("current");
-    const active = tocList.querySelector(`a[data-path="${CSS.escape(BOOK.spine[BOOK.index])}"]`);
-    if (active) {
-        active.classList.add("current");
-        active.scrollIntoView({ block: "nearest" });
+    syncTocHighlight();
+}
+
+/* The TOC highlight follows the heading, not merely the chapter. A book's
+   contents usually names sections *inside* one document: epubx splits the nav
+   href, so those entries share the chapter's `href` and differ only in the
+   fragment it hands over as `anchor` (nav.py). Several links therefore carry
+   one `data-path`, and a plain path lookup always finds the first — the
+   chapter's own entry. Measure instead: of this chapter's anchored entries,
+   the last heading above the reading line is the one being read. */
+
+const TOC_READING_LINE = 0.3; // fraction of the viewport a heading owns
+
+function frameAnchorElement(doc, anchor) {
+    // A fragment names an id, or a legacy named anchor.
+    return doc.getElementById(anchor) || doc.getElementsByName(anchor)[0] || null;
+}
+
+function frameAnchorInView(path) {
+    const doc = frameDocument();
+    if (!doc || !doc.body) return null;
+    let line;
+    try {
+        line = (frame.contentWindow.innerHeight || 0) * TOC_READING_LINE;
+    } catch {
+        return null; // opaque origin: nothing to measure
     }
+    let inView = null;
+    const links = tocList.querySelectorAll(
+        `a[data-anchor][data-path="${CSS.escape(path)}"]`);
+    for (const link of links) {
+        const target = frameAnchorElement(doc, link.dataset.anchor);
+        if (!target) continue; // an anchor the book never defines
+        if (target.getBoundingClientRect().top <= line) {
+            inView = link.dataset.anchor;
+        }
+    }
+    return inView;
+}
+
+function syncTocHighlight() {
+    const path = BOOK.spine[BOOK.index];
+    if (!path) return;
+    const links = tocList.querySelectorAll(`a[data-path="${CSS.escape(path)}"]`);
+    if (!links.length) return;
+    const wanted = pendingAnchor || frameAnchorInView(path);
+    let active = null;
+    for (const link of links) {
+        const anchor = link.dataset.anchor || "";
+        if (wanted && anchor === wanted) { active = link; break; }
+        // No heading in view — or an anchor the book never defines: the
+        // chapter's own entry, the link that names no fragment.
+        if (!active && !anchor) active = link;
+    }
+    active = active || links[0];
+    const previous = tocList.querySelector("a.current");
+    if (previous === active) return;
+    if (previous) previous.classList.remove("current");
+    active.classList.add("current");
+    active.scrollIntoView({ block: "nearest" });
 }
 
 function renderToc(nodes, container) {
@@ -81,6 +141,9 @@ function renderToc(nodes, container) {
             const link = document.createElement("a");
             link.href = "#";
             link.dataset.path = node.href;
+            // A fragment on this chapter's own file: the section's marker.
+            // Chapter entries name no fragment and stay the fallback.
+            if (node.anchor) link.dataset.anchor = node.anchor;
             link.textContent = node.label || node.href;
             const index = BOOK.spine.indexOf(node.href);
             link.onclick = (event) => {
@@ -438,9 +501,29 @@ function restoreScroll(chapter) {
     }, 350);
 }
 
+let tocSyncQueued = false;
+
+function queueTocSync() {
+    if (tocSyncQueued) return;
+    tocSyncQueued = true;
+    requestAnimationFrame(() => {
+        tocSyncQueued = false;
+        // The reader scrolled: the reading line decides the highlight now, not
+        // the entry a click asked for (whose scroll may already have passed).
+        pendingAnchor = null;
+        syncTocHighlight();
+    });
+}
+
 function wireFrameScroll() {
     try {
-        frame.contentWindow.addEventListener("scroll", scheduleProgressSave, { passive: true });
+        const win = frame.contentWindow;
+        // Wired once per window: a same-document fragment navigation keeps the
+        // window, and a second listener would only repeat the work.
+        if (win.readerScrollWired) return;
+        win.readerScrollWired = true;
+        win.addEventListener("scroll", scheduleProgressSave, { passive: true });
+        win.addEventListener("scroll", queueTocSync, { passive: true });
     } catch { /* opaque origin */ }
 }
 
@@ -588,6 +671,12 @@ frame.addEventListener("load", () => {
     wireMarkers();  // word-convention markers wire immediately
     loadEdges();    // library-classified edges wire when they arrive
     ReaderPanel.onFrameLoad();  // selection + saved highlights for this chapter
+    // The requested anchor is the frame's own scroll now; a cached chapter can
+    // settle late (images push the headings down), so aim the highlight once
+    // more after the layout has had a moment.
+    pendingAnchor = null;
+    syncTocHighlight();
+    setTimeout(syncTocHighlight, 350);
 });
 
 /* ---- init ---- */
