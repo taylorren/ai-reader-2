@@ -577,19 +577,28 @@ body.dark-mode #toc-list a.current { color: #f0a370; background: rgba(240, 163, 
     transition: opacity 0.2s, transform 0.2s;
 }
 /* A resumed reading position: a one-off notice under the bar, so the reader
-   knows the page did not open at the top by accident. Dismissed, or used to
-   jump back to the beginning. */
+   knows the page did not open at the top by accident. Dismissed with the ×.
+   The text is centred and a touch larger than the surrounding chrome so it
+   reads at a glance; the × is pinned to the edge, and the matching padding
+   keeps the sentence centred on the page rather than on the room left for
+   the button. */
 .resume-notice {
+    position: relative;
     flex: none;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 14px;
+    justify-content: center;
+    padding: 9px 44px;
     background: var(--accent-soft);
     border-bottom: 1px solid var(--line);
     color: var(--text);
-    font-size: 0.85em;
+    font-size: 1.05em;
 }
-#resume-text { flex: 1; }
-.resume-notice .btn { padding: 4px 10px; font-size: 0.95em; }
+#resume-text { flex: 1; text-align: center; }
+#resume-dismiss {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+}
 

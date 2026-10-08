@@ -215,12 +215,17 @@ def test_the_shell_carries_a_highlight_deep_link(isolated_client, isolated):
 
 
 def test_the_shell_carries_the_resume_notice(isolated_client, isolated):
-    """A restored position is announced: the reader sees where it resumed."""
+    """A restored position is announced: the reader sees where it resumed.
+
+    Text plus a dismiss × only — 回到开头 was taken out.
+    """
     slug = upload(isolated_client, isolated)
     body = isolated_client.get(f"/read/{slug}/0").text
     assert 'id="resume-notice"' in body
     assert 'id="resume-text"' in body
-    assert 'id="resume-top"' in body
+    assert 'id="resume-dismiss"' in body
+    assert 'id="resume-top"' not in body
+    assert "回到开头" not in body
 
 
 def test_the_shell_loads_its_scripts_from_the_repo(isolated_client, isolated):

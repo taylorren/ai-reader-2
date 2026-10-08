@@ -222,6 +222,15 @@ body { position: relative; }
   height: 0;
   border-top: 2px solid #2f7bd6;
   cursor: pointer;
+  /* The retire is a fade, not a pop. 500ms must match RESUME_MARKER_FADE_MS,
+     the timer that removes the node once the transition has finished. */
+  transition: opacity 0.5s ease;
+}
+/* Asked to go — the reader scrolled on, or clicked it: fade out, and stop
+   taking clicks while it goes. */
+.reader-resume-line.retiring {
+  opacity: 0;
+  pointer-events: none;
 }
 .reader-resume-line span {
   position: absolute;
@@ -400,14 +409,6 @@ function showResumeNotice(percent) {
 function wireResumeNotice() {
     const notice = document.getElementById("resume-notice");
     if (!notice) return;
-    document.getElementById("resume-top").addEventListener("click", () => {
-        try {
-            frame.contentWindow.scrollTo(0, 0);
-        } catch { /* opaque origin */ }
-        saveProgress(0);
-        clearResumeMarker();
-        notice.hidden = true;
-    });
     document.getElementById("resume-dismiss").addEventListener("click", () => {
         notice.hidden = true;
     });
@@ -427,6 +428,55 @@ function clearResumeMarker() {
     const doc = frameDocument();
     const existing = doc && doc.querySelector(".reader-resume-line");
     if (existing) existing.remove();
+}
+
+/* The badge is a one-off: the reader scrolling away retires it, exactly as
+   clicking it does. Two things keep that from feeling abrupt:
+
+   - The restore's own `scrollTo()` fires scroll events as well, so the offset
+     the badge sits at is remembered — an event still on that offset is the
+     restore, not the reader moving. The offset is re-read from the window
+     rather than captured from the event, so a scroll delivered after the
+     delayed re-aim still compares against where the badge actually is.
+   - Scrolling *pauses* the badge rather than killing it: the retire is
+     debounced, so it stays put while the reader is moving, and only fades out
+     once they have settled. */
+const RESUME_MARKER_RETIRE_MS = 1500;   // after the reader stops scrolling
+const RESUME_MARKER_FADE_MS = 500;      // must match RESUME_CSS's transition
+
+let resumeMarkerTop = null;        // the offset the badge was placed at
+let resumeMarkerRetired = false;   // the reader moved on: never place it again
+let resumeMarkerTimer = null;      // the queued retire, while the reader scrolls
+
+function retireResumeMarker() {
+    resumeMarkerRetired = true;
+    resumeMarkerTop = null;
+    if (resumeMarkerTimer) {
+        clearTimeout(resumeMarkerTimer);
+        resumeMarkerTimer = null;
+    }
+    const doc = frameDocument();
+    const line = doc && doc.querySelector(".reader-resume-line");
+    if (!line) return;
+    // Fade first, drop after: a removed node cannot transition, so the class
+    // starts the fade and the timer takes it out once the fade is done.
+    line.classList.add("retiring");
+    setTimeout(() => line.remove(), RESUME_MARKER_FADE_MS);
+}
+
+function scheduleResumeMarkerRetire() {
+    if (resumeMarkerTimer) clearTimeout(resumeMarkerTimer);
+    resumeMarkerTimer = setTimeout(retireResumeMarker, RESUME_MARKER_RETIRE_MS);
+}
+
+function retireResumeMarkerOnScroll() {
+    if (resumeMarkerTop === null || resumeMarkerRetired) return;
+    let top;
+    try {
+        top = frame.contentWindow.pageYOffset || 0;
+    } catch { return; }                        // opaque origin: nothing to measure
+    if (Math.abs(top - resumeMarkerTop) < 2) return;  // the restore's own scroll
+    scheduleResumeMarkerRetire();
 }
 
 function placeResumeMarker() {
@@ -451,8 +501,18 @@ function placeResumeMarker() {
     const tag = doc.createElement("span");
     tag.textContent = "上次读到此处";
     line.appendChild(tag);
-    line.addEventListener("click", () => line.remove());
+    line.addEventListener("click", retireResumeMarker);
     doc.body.appendChild(line);
+    // Where the restore left the reader: the scroll event our own `scrollTo()`
+    // fires lands here, and must not be mistaken for the reader moving.
+    resumeMarkerTop = win.pageYOffset || 0;
+    resumeMarkerRetired = false;
+    // A re-aim replaces the badge, so a retire queued against the old one is
+    // stale: drop it rather than let it fade the fresh badge out.
+    if (resumeMarkerTimer) {
+        clearTimeout(resumeMarkerTimer);
+        resumeMarkerTimer = null;
+    }
 }
 
 /* The first paragraph boundary at or below the top edge: the rule sits in the
@@ -497,7 +557,10 @@ function restoreScroll(chapter) {
     }
     setTimeout(() => {
         scrollToPercent();
-        if (placed) placeResumeMarker();   // re-aim once the layout has settled
+        // Re-aim once the layout has settled — unless the reader has already
+        // scrolled past the badge (or clicked it away): a retired badge stays
+        // gone, so a late re-aim cannot resurrect it.
+        if (placed && !resumeMarkerRetired) placeResumeMarker();
     }, 350);
 }
 
@@ -524,6 +587,10 @@ function wireFrameScroll() {
         win.readerScrollWired = true;
         win.addEventListener("scroll", scheduleProgressSave, { passive: true });
         win.addEventListener("scroll", queueTocSync, { passive: true });
+        // The "上次读到此处" badge belongs to the restored position: scrolling
+        // away retires it (debounced, so it stays put while the reader is still
+        // moving), and it never lingers over text the reader has left.
+        win.addEventListener("scroll", retireResumeMarkerOnScroll, { passive: true });
     } catch { /* opaque origin */ }
 }
 
