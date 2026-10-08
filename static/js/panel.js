@@ -414,6 +414,11 @@ window.ReaderPanel = (function () {
             'placeholder="写下你的笔记…（支持 Markdown）"></textarea>';
         showButtons({ save: true, delete: true });
         el("panel-save").textContent = "保存笔记";
+        // The note is the whole point of this mode: put the caret in the box,
+        // so 添加笔记 ends with typing rather than with a second click. The
+        // panel is already open (openPanel ran before the highlight was
+        // created), so the box is laid out and focusable by now.
+        el("comment-input").focus();
     }
 
     async function startDiscussion() {
