@@ -128,38 +128,130 @@ function syncTocHighlight() {
     active = active || links[0];
     const previous = tocList.querySelector("a.current");
     if (previous === active) return;
+    // The entry being read must be visible: open its branch and the branches
+    // above it. Done only when the active entry changes, so a reader can still
+    // collapse it by hand without it springing back on the next sync.
+    revealEntry(active);
     if (previous) previous.classList.remove("current");
     active.classList.add("current");
     active.scrollIntoView({ block: "nearest" });
 }
 
-function renderToc(nodes, container) {
+/* A deep outline — a volume of forty chapters — is unusable fully open, so
+   every entry with children carries a caret and starts collapsed. The branch
+   of the chapter being read opens automatically (syncTocHighlight), and a
+   reader's own toggles are remembered per book. */
+
+const TOC_STORE_KEY = "tocExpanded:" + BOOK.slug;
+
+function tocKey(node) {
+    return (node.href || "") + "|" + (node.anchor || "") + "|" + (node.label || "");
+}
+
+function loadExpanded() {
+    try {
+        return new Set(JSON.parse(localStorage.getItem(TOC_STORE_KEY) || "[]"));
+    } catch {
+        return new Set();
+    }
+}
+
+function saveExpanded(expanded) {
+    try {
+        localStorage.setItem(TOC_STORE_KEY, JSON.stringify([...expanded]));
+    } catch {
+        // Storage full or disabled: the pane still works, just not remembered.
+    }
+}
+
+// Open or close a branch. `remember` is true only for a reader's own click —
+// automatic reveals are not written, so the stored set stays the reader's.
+function setBranch(li, expanded, remember) {
+    li.classList.toggle("expanded", expanded);
+    li.classList.toggle("collapsed", !expanded);
+    const caret = li.querySelector(":scope > .toc-node > .toc-caret");
+    if (caret) caret.setAttribute("aria-expanded", String(expanded));
+    if (remember && li.dataset.tocKey) {
+        const stored = loadExpanded();
+        if (expanded) stored.add(li.dataset.tocKey);
+        else stored.delete(li.dataset.tocKey);
+        saveExpanded(stored);
+    }
+}
+
+// Open the entry's own branch and every branch above it, so the entry being
+// read is on screen together with its sub-entries.
+function revealEntry(link) {
+    for (let li = link.closest("li"); li; li = li.parentElement.closest("li")) {
+        if (li.classList.contains("toc-branch") && li.classList.contains("collapsed")) {
+            setBranch(li, true, false);
+        }
+    }
+}
+
+function tocLabel(node) {
+    if (node.href && BOOK.spine.includes(node.href)) {
+        const link = document.createElement("a");
+        link.href = "#";
+        link.dataset.path = node.href;
+        // A fragment on this chapter's own file: the section's marker.
+        // Chapter entries name no fragment and stay the fallback.
+        if (node.anchor) link.dataset.anchor = node.anchor;
+        link.textContent = node.label || node.href;
+        const index = BOOK.spine.indexOf(node.href);
+        link.onclick = (event) => {
+            event.preventDefault();
+            load(index, node.anchor);
+        };
+        return link;
+    }
+    const span = document.createElement("span");
+    span.textContent = node.label || "";
+    return span;
+}
+
+function buildTocList(nodes, expanded) {
     const ul = document.createElement("ul");
+    ul.className = "toc-children";
     for (const node of nodes) {
         const li = document.createElement("li");
-        if (node.href && BOOK.spine.includes(node.href)) {
-            const link = document.createElement("a");
-            link.href = "#";
-            link.dataset.path = node.href;
-            // A fragment on this chapter's own file: the section's marker.
-            // Chapter entries name no fragment and stay the fallback.
-            if (node.anchor) link.dataset.anchor = node.anchor;
-            link.textContent = node.label || node.href;
-            const index = BOOK.spine.indexOf(node.href);
-            link.onclick = (event) => {
+        const children = node.children || [];
+        const row = document.createElement("div");
+        row.className = "toc-node";
+
+        if (children.length) {
+            const open = expanded.has(tocKey(node));
+            li.className = open ? "toc-branch expanded" : "toc-branch collapsed";
+            li.dataset.tocKey = tocKey(node);
+            const caret = document.createElement("button");
+            caret.type = "button";
+            caret.className = "toc-caret";
+            caret.setAttribute("aria-expanded", String(open));
+            caret.title = "展开 / 收起";
+            caret.addEventListener("click", (event) => {
                 event.preventDefault();
-                load(index, node.anchor);
-            };
-            li.appendChild(link);
+                event.stopPropagation();
+                setBranch(li, !li.classList.contains("expanded"), true);
+            });
+            row.appendChild(caret);
         } else {
-            const span = document.createElement("span");
-            span.textContent = node.label || "";
-            li.appendChild(span);
+            // A leaf keeps the caret's width, so labels stay aligned.
+            const spacer = document.createElement("i");
+            spacer.className = "toc-caret toc-caret-spacer";
+            spacer.setAttribute("aria-hidden", "true");
+            row.appendChild(spacer);
         }
-        if (node.children && node.children.length) renderToc(node.children, li);
+
+        row.appendChild(tocLabel(node));
+        li.appendChild(row);
+        if (children.length) li.appendChild(buildTocList(children, expanded));
         ul.appendChild(li);
     }
-    container.appendChild(ul);
+    return ul;
+}
+
+function renderToc(nodes, container) {
+    container.appendChild(buildTocList(nodes, loadExpanded()));
 }
 
 function applySidebar() {

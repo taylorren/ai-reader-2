@@ -126,7 +126,13 @@ body.dark-mode .sidebar-title { color: #eadfc8; }
 #toc-list ul { list-style: none; margin: 0; padding-left: 14px; }
 #toc-list > ul { padding-left: 2px; }
 #toc-list li { margin: 1px 0; }
-#toc-list a, #toc-list span {
+
+/* A row is the disclosure caret (or a leaf's spacer) beside the label. */
+.toc-node { display: flex; align-items: flex-start; }
+#toc-list .toc-node > a,
+#toc-list .toc-node > span {
+    flex: 1 1 auto;
+    min-width: 0;
     display: block;
     padding: 6px 9px;
     border-radius: 6px;
@@ -138,9 +144,36 @@ body.dark-mode .sidebar-title { color: #eadfc8; }
 }
 #toc-list a:hover { color: #2f2416; }
 #toc-list a.current { color: #9c4f2e; font-weight: 600; background: rgba(156, 79, 46, 0.08); }
-body.dark-mode #toc-list a, body.dark-mode #toc-list span { color: #c7bca7; }
+body.dark-mode #toc-list .toc-node > a,
+body.dark-mode #toc-list .toc-node > span { color: #c7bca7; }
 body.dark-mode #toc-list a:hover { color: #f3ead7; }
 body.dark-mode #toc-list a.current { color: #f0a370; background: rgba(240, 163, 112, 0.1); }
+
+/* The disclosure caret: ▸ collapsed, ▾ open. Its height matches one label
+   line, so a wrapped label leaves the caret on the first line. */
+.toc-caret {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: #a3967c;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+}
+.toc-caret::before { content: "▸"; }
+li.toc-branch.expanded > .toc-node > .toc-caret::before { content: "▾"; }
+.toc-caret:hover { color: #5f5546; }
+.toc-caret-spacer { cursor: default; visibility: hidden; }
+li.collapsed > .toc-children { display: none; }
+body.dark-mode .toc-caret { color: #8a7d68; }
+body.dark-mode .toc-caret:hover { color: #f3ead7; }
 
 /* The expand handle, shown only while the sidebar is collapsed */
 
