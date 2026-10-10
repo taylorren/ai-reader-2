@@ -635,3 +635,40 @@ body.dark-mode .toc-caret:hover { color: #f3ead7; }
     transform: translateY(-50%);
 }
 
+/* An image clicked in the book: a shell overlay that shows it at its own
+   size — never scaled to fit the reading column — so a plate or map can be
+   read in full. The dimmed surround scrolls when the image is larger than
+   the viewport, and clicking it (or the ×) closes the popup. */
+.image-popup {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: flex;
+    padding: 24px;
+    background: rgba(20, 16, 12, 0.72);
+    overflow: auto;
+}
+.image-popup img {
+    /* `margin: auto` centres the image in the flex box and — unlike
+       `align-items: center` — keeps its top edge reachable when the image is
+       taller than the viewport. `max-*: none` overrides the paper column's
+       `max-width: 100%`, so the image keeps its own pixel metrics. */
+    margin: auto;
+    max-width: none;
+    max-height: none;
+    width: auto;
+    height: auto;
+    background: #ffffff;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.image-popup-close {
+    position: fixed;
+    top: 14px;
+    right: 16px;
+    z-index: 1;
+    background: rgba(255, 255, 255, 0.92);
+    color: #333333;
+    border-color: rgba(0, 0, 0, 0.15);
+}
+.image-popup-close:hover { color: #111111; }
+

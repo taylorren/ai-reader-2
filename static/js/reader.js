@@ -270,6 +270,12 @@ document.getElementById("sidebar-expand").addEventListener("click", () => {
 
 document.addEventListener("keydown", (event) => {
     if (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA") return;
+    // A popped-out image is modal: ESC closes it, and the arrows do not turn
+    // the chapter behind it.
+    if (!imagePopup.hidden) {
+        if (event.key === "Escape") hideImagePopup();
+        return;
+    }
     if (event.key === "Escape") hidePopup();
     if (event.key === "ArrowLeft") load(BOOK.index - 1);
     if (event.key === "ArrowRight") load(BOOK.index + 1);
@@ -284,6 +290,14 @@ The book's own scripts still never run. Choosing 书本 removes the injection
 and restores the publisher's design untouched. */
 
 const READER_STYLE_ID = "reader-style";
+
+// A click on an image pops it out into the shell (see showImagePopup). The
+// cursor is the only hint inside the frame's own document, so it is injected
+// there — with `!important` because a book's own CSS must not hide it. It
+// stays in 书本 mode too: the pop-out is a reading aid, not paper styling.
+const IMAGE_CSS = `
+img[data-reader-zoom] { cursor: zoom-in !important; }
+`;
 
 // Painted highlights live in the frame's document, so their colours must be
 // injected there too — and they stay visible in 书本 mode, where the book's
@@ -389,11 +403,12 @@ function applyFrameStyle() {
     }
     if (state.mode === "book") {
         // The publisher's design, untouched: no paper stylesheet — but the
-        // painted highlights and the resume rule still need their colours.
-        style.textContent = HIGHLIGHT_CSS + RESUME_CSS;
+        // painted highlights, the resume rule and the image cursor still need
+        // to be there.
+        style.textContent = IMAGE_CSS + HIGHLIGHT_CSS + RESUME_CSS;
         return;
     }
-    style.textContent = framePaperCSS() + HIGHLIGHT_CSS + RESUME_CSS;
+    style.textContent = framePaperCSS() + IMAGE_CSS + HIGHLIGHT_CSS + RESUME_CSS;
 }
 
 function applyTheme() {
@@ -808,10 +823,63 @@ function hidePopup() {
     footnotePopup.classList.remove("show");
 }
 
+/* ---- Images: click one to pop it out at its own size ----
+
+The served XHTML carries the book's own <img> tags, which the paper styles
+scale down to the reading column. Clicking one opens it in a shell overlay at
+its intrinsic size — the book's own metrics, never the column's — so a plate
+or map can be read in full. The book's document is never modified beyond the
+cursor hint; the overlay and its image live in the shell. */
+
+const imagePopup = document.getElementById("image-popup");
+const imagePopupImg = document.getElementById("image-popup-img");
+const imagePopupClose = document.getElementById("image-popup-close");
+
+function showImagePopup(src, alt) {
+    if (!src) return;
+    imagePopupImg.src = src;
+    imagePopupImg.alt = alt || "";
+    imagePopup.hidden = false;
+    // Focus the × so ESC lands in the shell's document (the frame is its own
+    // event tree) and the overlay owns the keyboard while it is open.
+    imagePopupClose.focus();
+}
+
+function hideImagePopup() {
+    if (imagePopup.hidden) return;
+    imagePopup.hidden = true;
+    // Drop the src so a large plate is not kept decoded after it is closed.
+    imagePopupImg.removeAttribute("src");
+}
+
+imagePopup.addEventListener("click", (event) => {
+    // Only the dimmed surround closes: a click on the image (or the ×, which
+    // has its own handler) must not. The image is a child, so a hit on the
+    // backdrop is the overlay element itself.
+    if (event.target === imagePopup) hideImagePopup();
+});
+imagePopupClose.addEventListener("click", hideImagePopup);
+
+function wireImages() {
+    const doc = frameDocument();
+    if (!doc || !doc.body) return;
+    for (const image of doc.querySelectorAll("img")) {
+        if (image.dataset.readerZoom) continue;
+        image.dataset.readerZoom = "1";  // also carries the zoom-in cursor (IMAGE_CSS)
+        image.addEventListener("click", (event) => {
+            // A figure wrapped in a link would otherwise navigate the frame.
+            event.preventDefault();
+            event.stopPropagation();
+            showImagePopup(image.currentSrc || image.src, image.alt);
+        });
+    }
+}
+
 // In-book links navigate the frame natively; follow along so the position
 // and the TOC highlight stay in step with what the reader is looking at.
 frame.addEventListener("load", () => {
     hidePopup();
+    hideImagePopup();
     applyFrameStyle();
     wireFrameScroll();
     restoreScroll(BOOK.index);
@@ -828,6 +896,7 @@ frame.addEventListener("load", () => {
     // Wiring happens whatever the frame navigated to: an unrelated URL must
     // never leave the reader without footnotes or highlights.
     wireMarkers();  // word-convention markers wire immediately
+    wireImages();   // images pop out into the shell at their own size
     loadEdges();    // library-classified edges wire when they arrive
     ReaderPanel.onFrameLoad();  // selection + saved highlights for this chapter
     // The requested anchor is the frame's own scroll now; a cached chapter can
@@ -854,9 +923,11 @@ mark();
 // dataset guards make repeated wiring harmless. The delayed re-wire
 // catches any load that completed in between.
 wireMarkers();
+wireImages();
 loadEdges();
 ReaderPanel.onFrameLoad();
 setTimeout(wireMarkers, 300);
+setTimeout(wireImages, 300);
 // A cached chapter can finish loading before the listener above was attached,
 // so its `load` event never reaches us. Ask the panel again shortly: that also
 // gives the frame's layout time to settle before any deep-link reveal.

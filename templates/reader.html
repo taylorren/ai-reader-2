@@ -70,6 +70,14 @@
             </main>
             <div id="footnote-popup" class="footnote-popup"></div>
 
+            <!-- An image clicked in the book pops out here, at its own size.
+                 Clicking the dimmed surround (or the ×) closes it. -->
+            <div id="image-popup" class="image-popup" hidden>
+                <button id="image-popup-close" class="icon-btn image-popup-close"
+                        title="关闭">×</button>
+                <img id="image-popup-img" alt="">
+            </div>
+
             <!-- Selection actions: the shell's menu over the frame. -->
             <div id="context-menu" class="context-menu" hidden>
                 <div class="context-menu-item" data-action="fact_check">📋 解释说明</div>
