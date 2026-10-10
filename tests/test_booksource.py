@@ -9,7 +9,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fixtures import write_epub, write_sectioned_epub  # noqa: E402
+from fixtures import (  # noqa: E402
+    write_epub,
+    write_sectioned_epub,
+    write_volume_epub,
+)
 
 from booksource import Book  # noqa: E402
 
@@ -70,6 +74,23 @@ def test_toc_keeps_a_sections_fragment_beside_its_chapter(tmp_path):
         ("OEBPS/ch1.xhtml", "sec-a"),
         ("OEBPS/ch1.xhtml", "sec-b"),
     ]
+
+def test_toc_json_fills_chapters_a_volume_only_nav_leaves_out(tmp_path):
+    """A nav that names only volumes still reaches the chapters inside them:
+    toc_json asks epubx for the derived outline, not the declared nav alone."""
+    opened = Book.open(write_volume_epub(tmp_path / "volumes.epub"))
+    try:
+        tree = opened.toc_json()
+    finally:
+        opened.close()
+
+    assert [n["label"] for n in tree] == ["Volume One", "Volume Two"]
+    assert [(c["label"], c["href"], c["anchor"]) for c in tree[0]["children"]] == [
+        ("Chapter 1", "OEBPS/vol1.xhtml", "c1"),
+        ("Chapter 2", "OEBPS/vol1.xhtml", "c2"),
+    ]
+
+
 
 
 def test_cover_path_points_into_the_book_itself(book):

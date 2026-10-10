@@ -114,7 +114,14 @@ class Book:
         return cover.path if cover else None
 
     def toc_json(self) -> list[dict]:
-        """The table of contents as a tree of plain dicts (the MVP's shape)."""
+        """The table of contents as a tree of plain dicts (the MVP's shape).
+
+        `outline`, not `toc`: the book's declared navigation with chapters
+        filled in from its headings wherever the nav stops short (epubx's
+        derived outline). A volume-only NCX then still offers a way into each
+        volume. It reads every chapter, so the caller pays that parse once per
+        book — the same work the reader does when it renders the chapter.
+        """
         if self._book is None:
             return []
 
@@ -125,7 +132,7 @@ class Book:
                 for n in nodes
             ]
 
-        return shape(self._book.toc)
+        return shape(self._book.outline)
 
     # -- the book's own files ----------------------------------------------
 

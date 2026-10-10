@@ -227,6 +227,77 @@ def write_sectioned_epub(path) -> Path:
         zf.writestr("OEBPS/ch1.xhtml", SECTIONED_CHAPTER)
     return Path(path)
 
+# A nav that names only the volumes — the shape a Calibre MOBI->EPUB conversion
+# leaves behind: the chapters inside each volume exist only as headings in the
+# volume's own document, so the *declared* contents stops at the volume. The
+# adapter asks epubx for the derived outline, which fills those chapters in.
+VOLUME_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Volume Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:volume-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="v1" href="vol1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="v2" href="vol2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="v1"/>
+    <itemref idref="v2"/>
+  </spine>
+</package>
+"""
+
+VOLUME_NAV = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Contents</title></head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <ol>
+      <li><a href="vol1.xhtml">Volume One</a></li>
+      <li><a href="vol2.xhtml">Volume Two</a></li>
+    </ol>
+  </nav>
+</body>
+</html>
+"""
+
+VOLUME_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>{title}</title></head>
+<body>
+  <h2 id="v">{title}</h2>
+  <p>{title} opens with a paragraph long enough that the text detector sees a
+     real book and not a page of pictures, and it keeps going well past the
+     threshold so the volume is not mistaken for a scan.</p>
+  <h3 id="{c1}">Chapter 1</h3>
+  <p>The first chapter of {title}, whose heading the nav never names.</p>
+  <h3 id="{c2}">Chapter 2</h3>
+  <p>The second chapter, also named only by its heading.</p>
+</body>
+</html>
+"""
+
+
+def write_volume_epub(path) -> Path:
+    """A book whose nav names only its volumes, not the chapters inside them."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", VOLUME_OPF)
+        zf.writestr("OEBPS/nav.xhtml", VOLUME_NAV)
+        zf.writestr("OEBPS/vol1.xhtml", VOLUME_CHAPTER.format(
+            title="Volume One", c1="c1", c2="c2"))
+        zf.writestr("OEBPS/vol2.xhtml", VOLUME_CHAPTER.format(
+            title="Volume Two", c1="c3", c2="c4"))
+    return Path(path)
+
+
+
 
 # Real content DRM, modelled on epubx's fixture: an EncryptedKey means a
 # licence is in play, and epubx names the book `unsupported` at open.
