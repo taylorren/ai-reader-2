@@ -31,7 +31,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bleach" },
-    { name = "epub-extended", specifier = ">=0.1.0" },
+    { name = "epub-extended", specifier = ">=0.2.1" },
     { name = "fastapi", specifier = ">=0.121.2" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx2", specifier = ">=2.0" },
@@ -118,14 +118,14 @@ wheels = [
 
 [[package]]
 name = "epub-extended"
-version = "0.2.0"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lxml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ed/9b/5e72f43d484dca395303807b9c88d4169ceaa4494b7bde209a5ec8487a53/epub_extended-0.2.0.tar.gz", hash = "sha256:82c1802c41728913ef8494000fe73b86c7add5ad24b12b2b83641b052dbd70fe", size = 81042, upload-time = "2026-10-10T00:02:16.823Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/ba/b10daac0e2ad9e91d83022758cf080e920c4f9b441ffaa22492c168ad859/epub_extended-0.2.2.tar.gz", hash = "sha256:edd39abce5b163b9a14bb26b7be920bedd9a362608ca42e9b59c5cc7b0aa82ac", size = 83594, upload-time = "2026-10-10T02:18:29.656Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/76/bf4125a1d3485357378583a5d17cfa6363e0b3ed302d1931b55a1ddd005d/epub_extended-0.2.0-py3-none-any.whl", hash = "sha256:e7e340f4cc06918b1d42a7496430e394dc2610a535b442ff90d1c7cb94a9b30f", size = 38286, upload-time = "2026-10-10T00:02:15.549Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/1d/c49a127af1cc26dc2092b21fe223a0a09a60413b21ffbacdb3d100d40e5c/epub_extended-0.2.2-py3-none-any.whl", hash = "sha256:71e89809365a2a880c890fd92cd3d41663890b8a412fcd6dfd9465061b8a32ee", size = 39643, upload-time = "2026-10-10T02:18:28.024Z" },
 ]
 
 [[package]]

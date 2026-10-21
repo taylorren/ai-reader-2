@@ -13,6 +13,11 @@ uv run server.py      # http://127.0.0.1:8123
 uv run pytest -q
 ```
 
+Static assets are read from disk on every request, but Python is loaded once at
+startup: after editing a router or a model, restart the server
+(`systemctl restart reader3`). A running process serving the new `panel.js`
+against the old request model rejects every save with a 422.
+
 **Status: P4.** A real book renders from its own files: the reader shell loads
 chapters in a sandboxed iframe (render model A — nothing rewritten, nothing
 from the book executes), with the book's own typography, a TOC drawer,

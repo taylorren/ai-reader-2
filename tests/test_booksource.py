@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fixtures import (  # noqa: E402
     write_epub,
+    write_multiblock_note_epub,
     write_sectioned_epub,
     write_volume_epub,
 )
@@ -167,6 +168,25 @@ def test_unresolvable_edge_is_named_not_broken(book):
     assert edge["target_href"] is None
     assert edge["target_anchor"] is None
     assert edge["target_text"] is None
+
+
+def test_a_note_that_spans_several_paragraphs_is_gathered_whole(tmp_path):
+    """epubx resolves a note to the paragraph its anchor owns, but a note can
+    run on for paragraphs that carry no id of their own. The adapter gathers
+    them up to the next note, so the reader shows the whole note."""
+    opened = Book.open(write_multiblock_note_epub(tmp_path / "notes.epub"))
+    try:
+        edges = opened.footnotes(0)
+    finally:
+        opened.close()
+
+    assert [e["text"] for e in edges] == ["1", "2"]
+    assert edges[0]["target_text"] == (
+        "The first note opens here, and\n\n"
+        "it continues into a second paragraph with no id of its own."
+    )
+    # The next note is the bound: the gathering stops before it.
+    assert edges[1]["target_text"] == "The second note stands alone."
 
 
 # -- named failures -------------------------------------------------------

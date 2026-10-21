@@ -87,7 +87,7 @@ Same tables as ai-reader, plus columns that make the model explicit:
 
 ```sql
 books(slug PK, path, title, author, language, identifier, publisher, date,
-      word_count, cover_path, unsupported, added_at)
+      word_count, chapter_count, cover_path, unsupported, added_at)
 
 highlights(id, book_id, chapter_index, chapter_path, block_id,
            selected_text, context_before, context_after, created_at)
@@ -124,6 +124,10 @@ annotations.
 | `GET /highlights/{slug}` | Highlights view and export |
 | `POST /api/ai/analyze \| save \| discussion/start \| discussion/continue \| discussion/summarize`, `PUT /api/ai/update/{id}`, `DELETE /api/ai/delete/{id}` | AI |
 | `GET/POST /api/settings`, `POST /api/progress`, `POST /api/books/{slug}/completion` | Settings, progress, completion |
+
+A highlight is stored only with the first analysis it carries: `POST
+/api/ai/save` creates the highlight when the client has none yet, so an
+explanation or discussion the reader never saves leaves no mark in the book.
 
 ### The rendering contract
 

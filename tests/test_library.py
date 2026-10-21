@@ -166,3 +166,20 @@ def test_completion_toggle_round_trips(isolated_client, isolated, db):
 def test_completion_of_an_unknown_book_is_a_404(isolated_client):
     response = isolated_client.post("/api/books/ghost/completion?completed=true")
     assert response.status_code == 404
+
+
+def test_library_progress_spans_the_book_not_the_current_chapter(
+        isolated_client, isolated):
+    """`scroll_percent` is within-chapter; the card must show book progress."""
+    slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
+
+    # 60% down the first of the fixture's two spine documents is 30% of the
+    # book — the bug showed the raw 60.
+    isolated_client.post("/api/progress", json={
+        "book_id": slug, "chapter_index": 0, "scroll_percent": 60.0})
+    assert 'data-progress="30"' in isolated_client.get("/").text
+
+    # 90% down the last chapter is 95% of the book, not 90.
+    isolated_client.post("/api/progress", json={
+        "book_id": slug, "chapter_index": 1, "scroll_percent": 90.0})
+    assert 'data-progress="95"' in isolated_client.get("/").text

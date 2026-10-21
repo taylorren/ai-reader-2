@@ -5,7 +5,7 @@ description = "Self-hosted EPUB reader with AI-assisted annotation, built on epu
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "epub-extended>=0.1.0",
+    "epub-extended>=0.2.1",
     "fastapi>=0.121.2",
     "uvicorn>=0.38.0",
     "jinja2>=3.1.6",

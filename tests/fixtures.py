@@ -391,3 +391,49 @@ def write_drm_epub(path) -> Path:
         zf.writestr("OEBPS/ch1.xhtml", LOCKED_CHAPTER)
         zf.writestr("META-INF/encryption.xml", DRM_ENCRYPTION)
     return Path(path)
+
+
+# A book whose first note runs on for several paragraphs: the note's own
+# paragraph carries the id, the paragraphs that continue it carry none, and
+# the next note's paragraph follows. epubx resolves a note to the paragraph
+# its anchor owns; the adapter must gather the rest up to the next note.
+MULTIBLOCK_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Multiblock Notes</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:multiblock-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+MULTIBLOCK_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Chapter One</title></head>
+<body>
+  <h1 id="top">Chapter One</h1>
+  <p>The body opens with prose that names the first note<a epub:type="noteref" href="#note-1">1</a> and the second<a epub:type="noteref" href="#note-2">2</a>, and keeps going well past the point where the detector would mistake this chapter for a page of pictures.</p>
+  <p id="note-1">The first note opens here, and</p>
+  <p>it continues into a second paragraph with no id of its own.</p>
+  <p id="note-2">The second note stands alone.</p>
+</body>
+</html>
+"""
+
+
+def write_multiblock_note_epub(path) -> Path:
+    """A book whose first note spans several paragraphs."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", MULTIBLOCK_OPF)
+        zf.writestr("OEBPS/ch1.xhtml", MULTIBLOCK_CHAPTER)
+    return Path(path)

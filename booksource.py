@@ -180,13 +180,13 @@ class Book:
         ]
 
     def footnotes(self, index: int) -> list[dict]:
-
         """The chapter's footnote edges, normalized by the library.
 
         The library recognizes the book's own footnote signals — semantic
         ref types, footnote classes, and the compact ids of Word/Calibre
-        pipelines — and resolves each marker to the block holding its note.
-        The edge carries the note's text and the target's book-internal
+        pipelines — and resolves each marker to the note it opens. The edge
+        carries the note's text (a note that runs on for several paragraphs
+        is gathered whole by the library) and the target's book-internal
         path, so a reader opens a note without fetching a rendered page.
         Markers the library cannot recognize yield no edges; the book's own
         links still work natively.

@@ -90,19 +90,36 @@ def highlight_kind(highlight: dict) -> str:
     return analyses[0]["analysis_type"] if analyses else "highlight"
 
 
+def store_highlight(book_id: str, chapter_index: int, selected_text: str,
+                    chapter_path: str | None = None,
+                    block_id: str | None = None,
+                    context_before: str = "", context_after: str = "") -> int:
+    """Validate and store a highlight, returning its id.
+
+    The one place a highlight row is written: the highlight route and saving
+    an analysis both come through here, so the reader's mark is created the
+    same way whichever endpoint carries it. A highlight is never stored on
+    its own — it is the mark a saved analysis hangs on.
+    """
+    book = _require_chapter(book_id, chapter_index)
+    selected = (selected_text or "").strip()
+    if not selected:
+        raise HTTPException(status_code=400, detail="Empty selection")
+    return get_db().save_highlight(
+        book_id, chapter_index, selected,
+        chapter_path=chapter_path or book.spine[chapter_index],
+        block_id=block_id,
+        context_before=context_before, context_after=context_after,
+    )
+
+
 @router.post("/api/highlight")
 def create_highlight(req: HighlightRequest):
     """Save a highlight. Its analyses arrive later, one endpoint at a time."""
-    book = _require_chapter(req.book_id, req.chapter_index)
-    selected = req.selected_text.strip()
-    if not selected:
-        raise HTTPException(status_code=400, detail="Empty selection")
-    highlight_id = get_db().save_highlight(
-        req.book_id, req.chapter_index, selected,
-        chapter_path=req.chapter_path or book.spine[req.chapter_index],
-        block_id=req.block_id,
-        context_before=req.context_before, context_after=req.context_after,
-    )
+    highlight_id = store_highlight(
+        req.book_id, req.chapter_index, req.selected_text,
+        chapter_path=req.chapter_path, block_id=req.block_id,
+        context_before=req.context_before, context_after=req.context_after)
     return {"highlight_id": highlight_id, "status": "success"}
 
 

@@ -501,25 +501,9 @@ function scheduleProgressSave() {
     scrollSaveTimer = setTimeout(() => saveProgress(frameScrollPercent()), 500);
 }
 
-/* A resumed position is announced once, so the reader knows the page did not
-   open at the top by accident — and can jump back to the start. */
-let resumeNoticeShown = false;
-
-function showResumeNotice(percent) {
-    const notice = document.getElementById("resume-notice");
-    if (!notice) return;
-    document.getElementById("resume-text").textContent =
-        `⏱ 已回到上次阅读位置 · 第 ${BOOK.index + 1} 章 · ${Math.round(percent)}%`;
-    notice.hidden = false;
-}
-
-function wireResumeNotice() {
-    const notice = document.getElementById("resume-notice");
-    if (!notice) return;
-    document.getElementById("resume-dismiss").addEventListener("click", () => {
-        notice.hidden = true;
-    });
-}
+/* The resume rule is drawn once per session, on the return that restored a
+   saved position — never resurrected after the reader moves on. */
+let resumeMarkerPlaced = false;
 
 /* The "last read position" rule: a line drawn across the column where the
    reader stopped, injected into the frame's document (in memory only — the
@@ -654,12 +638,11 @@ function restoreScroll(chapter) {
         } catch { /* opaque origin */ }
     };
     scrollToPercent();
-    // The reader should know why the page did not open at the top — and where
-    // it opened — but only for the return that this session resumed.
-    const placed = !resumeNoticeShown;
+    // The rule marks where the page opened — but only for the return that this
+    // session resumed, and only once.
+    const placed = !resumeMarkerPlaced;
     if (placed) {
-        resumeNoticeShown = true;
-        showResumeNotice(percent);
+        resumeMarkerPlaced = true;
         placeResumeMarker();
     }
     setTimeout(() => {
@@ -795,7 +778,19 @@ function showPopup(anchor, edge) {
             event.preventDefault();
             hidePopup();
             const index = BOOK.spine.indexOf(edge.target_href);
-            load(index >= 0 ? index : edge.target_chapter, edge.target_anchor);
+            const chapter = index >= 0 ? index : edge.target_chapter;
+            // A note in the chapter already on screen is reached by scrolling
+            // the frame directly: re-assigning the iframe's src with only a
+            // new fragment does not move every browser, and there is nothing
+            // to load. Any other chapter goes through the normal load.
+            const doc = chapter === BOOK.index ? frameDocument() : null;
+            const target = doc && edge.target_anchor
+                ? frameAnchorElement(doc, edge.target_anchor) : null;
+            if (target) {
+                target.scrollIntoView({ block: "start" });
+                return;
+            }
+            load(chapter, edge.target_anchor);
         });
         footnotePopup.appendChild(open);
     }
@@ -912,7 +907,6 @@ frame.addEventListener("load", () => {
 ReaderPanel.setBook(BOOK.slug);
 ReaderPanel.setChapter(BOOK.index);
 ReaderPanel.init();
-wireResumeNotice();
 renderToc(BOOK.toc, tocList);
 applySidebar();
 applyTheme();

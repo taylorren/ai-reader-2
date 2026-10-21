@@ -40,6 +40,7 @@ class Database:
                     publisher TEXT,
                     date TEXT,
                     word_count INTEGER NOT NULL DEFAULT 0,
+                    chapter_count INTEGER NOT NULL DEFAULT 0,
                     cover_path TEXT,
                     unsupported TEXT,
                     added_at TEXT NOT NULL
@@ -80,6 +81,9 @@ class Database:
             """)
             # Columns the model gained after an earlier build of this schema:
             # added in place, never recreated.
+            self._ensure_columns(conn, "books", {
+                "chapter_count": "INTEGER NOT NULL DEFAULT 0",
+            })
             self._ensure_columns(conn, "highlights", {
                 "chapter_path": "TEXT",
                 "block_id": "TEXT",
@@ -112,11 +116,11 @@ class Database:
         try:
             conn.execute("""
                 INSERT INTO books (slug, path, title, author, language, identifier,
-                                   publisher, date, word_count, cover_path,
-                                   unsupported, added_at)
+                                   publisher, date, word_count, chapter_count,
+                                   cover_path, unsupported, added_at)
                 VALUES (:slug, :path, :title, :author, :language, :identifier,
-                        :publisher, :date, :word_count, :cover_path,
-                        :unsupported, :added_at)
+                        :publisher, :date, :word_count, :chapter_count,
+                        :cover_path, :unsupported, :added_at)
                 ON CONFLICT(slug) DO UPDATE SET
                     path = excluded.path,
                     title = excluded.title,
@@ -126,6 +130,7 @@ class Database:
                     publisher = excluded.publisher,
                     date = excluded.date,
                     word_count = excluded.word_count,
+                    chapter_count = excluded.chapter_count,
                     cover_path = excluded.cover_path,
                     unsupported = excluded.unsupported
             """, row)
@@ -148,6 +153,20 @@ class Database:
         try:
             rows = conn.execute("SELECT * FROM books").fetchall()
             return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def set_chapter_count(self, slug: str, chapter_count: int) -> None:
+        """Record a book's spine length.
+
+        Uploads write it with the row; this exists for a one-time backfill of
+        a library whose rows predate the column.
+        """
+        conn = self._connect()
+        try:
+            conn.execute("UPDATE books SET chapter_count = ? WHERE slug = ?",
+                         (chapter_count, slug))
+            conn.commit()
         finally:
             conn.close()
 

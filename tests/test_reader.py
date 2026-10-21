@@ -214,18 +214,15 @@ def test_the_shell_carries_a_highlight_deep_link(isolated_client, isolated):
     assert '"target_highlight": ""' in plain or '"target_highlight":""' in plain
 
 
-def test_the_shell_carries_the_resume_notice(isolated_client, isolated):
-    """A restored position is announced: the reader sees where it resumed.
+def test_the_shell_carries_no_resume_notice(isolated_client, isolated):
+    """A restored position is silent: the notice's chapter + percent misled.
 
-    Text plus a dismiss × only — 回到开头 was taken out.
+    The in-text resume rule stays; only the bar's announcement is gone.
     """
     slug = upload(isolated_client, isolated)
     body = isolated_client.get(f"/read/{slug}/0").text
-    assert 'id="resume-notice"' in body
-    assert 'id="resume-text"' in body
-    assert 'id="resume-dismiss"' in body
-    assert 'id="resume-top"' not in body
-    assert "回到开头" not in body
+    assert 'id="resume-notice"' not in body
+    assert "已回到上次阅读位置" not in body
 
 
 def test_the_shell_loads_its_scripts_from_the_repo(isolated_client, isolated):

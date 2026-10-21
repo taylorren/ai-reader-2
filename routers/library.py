@@ -38,10 +38,17 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 @router.get("/", response_class=HTMLResponse)
 def library_view(request: Request):
-    """The library, read from SQLite — no EPUB is parsed to render it."""
+    """The library, read from SQLite — no EPUB is parsed to render it.
+
+    The one exception is a one-time backfill: a book uploaded before
+    `chapter_count` existed is opened once so its card can show whole-book
+    progress, then the column is written and every later render is SQLite.
+    """
     from . import get_db
 
-    cards = [library_card(row) for row in get_db().list_books()]
+    rows = get_db().list_books()
+    backfill_chapter_counts(rows)
+    cards = [library_card(row) for row in rows]
     return templates.TemplateResponse(
         request=request,
         name="library.html",
@@ -51,6 +58,47 @@ def library_view(request: Request):
                 "static/js/library-app.js", "static/css/library.css"),
         },
     )
+
+
+def backfill_chapter_counts(rows: list[dict]) -> None:
+    """Fill in `chapter_count` for books uploaded before the column existed.
+
+    Whole-book progress needs the spine length, which an upload now writes
+    with its row. A row that predates the column carries 0: its book is
+    opened once here and the count stored, so this is a no-op on every later
+    render — and for every newly uploaded book. An unsupported book is
+    skipped: it has no spine to read and no progress to place.
+    """
+    from . import BOOKS_DIR, book_cache, get_db
+
+    missing = [row for row in rows
+               if not row.get("chapter_count") and not row.get("unsupported")]
+    if not missing:
+        return
+    db = get_db()
+    for row in missing:
+        book = book_cache.get_or_open(row["slug"], BOOKS_DIR / row["path"])
+        if book.chapter_count:
+            db.set_chapter_count(row["slug"], book.chapter_count)
+            row["chapter_count"] = book.chapter_count
+
+
+def book_percent(progress: dict | None, chapter_count: int) -> int:
+    """How far through the whole book the reader is, as a percentage.
+
+    `scroll_percent` is the position *within the current chapter* — what
+    resume needs. A card must not show that as book progress: 60% down an
+    early chapter is not 60% of the book. The chapter's place in the spine is
+    combined with the in-chapter fraction, so the last chapter's last page is
+    100%. A single-document book is exactly its scroll percent.
+    """
+    if not progress:
+        return 0
+    scroll = min(100.0, max(0.0, progress["scroll_percent"] or 0.0))
+    if chapter_count <= 1:
+        return int(round(scroll))
+    index = min(max(progress["chapter_index"] or 0, 0), chapter_count - 1)
+    return int(round((index + scroll / 100.0) / chapter_count * 100))
 
 
 def library_card(row: dict) -> dict:
@@ -74,7 +122,7 @@ def library_card(row: dict) -> dict:
             if row["cover_path"] else None
         ),
         "unsupported": row["unsupported"],
-        "progress_percent": int(progress["scroll_percent"] or 0) if progress else 0,
+        "progress_percent": book_percent(progress, row.get("chapter_count") or 0),
         "has_progress": progress is not None,
         "is_completed": bool(progress["is_completed"]) if progress else False,
         "title_sort_key": transliterate_for_sort(title),
@@ -140,6 +188,7 @@ def upload_book(file: UploadFile = File(...)):
             "publisher": book.publisher,
             "date": book.date,
             "word_count": word_count,
+            "chapter_count": book.chapter_count,
             "cover_path": book.cover_path,
             "unsupported": reason,
             "added_at": (existing["added_at"] if replaced

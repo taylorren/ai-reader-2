@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from ai_service import PROVIDERS, AIServiceError
 
 from . import _runtime_settings, get_ai_service, get_db
+from .highlights import store_highlight
 
 router = APIRouter()
 
@@ -41,10 +42,23 @@ class AnalyzeRequest(BaseModel):
 
 
 class SaveAnalysisRequest(BaseModel):
-    highlight_id: int
+    """A saved analysis, and the highlight it marks.
+
+    `highlight_id` names an existing highlight (a second note on the same
+    text). When it is absent, the selection travels with the analysis and the
+    highlight is created here — the mark is stored only with its content, so
+    an explanation the reader never saves leaves nothing behind.
+    """
+    highlight_id: int | None = None
     analysis_type: str              # 'fact_check' | 'discussion' | 'comment'
     prompt: str = ""
     response: str
+    book_id: str | None = None
+    chapter_index: int | None = None
+    selected_text: str | None = None
+    block_id: str | None = None
+    context_before: str = ""
+    context_after: str = ""
 
 
 class ConversationMessage(BaseModel):
@@ -119,11 +133,27 @@ async def analyze_text(req: AnalyzeRequest):
 
 @router.post("/api/ai/save")
 def save_analysis(req: SaveAnalysisRequest):
-    """Persist an analysis (a fact-check, a discussion summary, or a note)."""
-    _require_highlight(req.highlight_id)
+    """Persist an analysis — and, when there is none yet, the highlight it marks.
+
+    A highlight is the mark a saved analysis hangs on: creating it here, in
+    the same act, is what keeps an unsaved explanation from leaving a mark.
+    """
+    highlight_id = req.highlight_id
+    if highlight_id is None:
+        if not req.book_id or req.chapter_index is None or not req.selected_text:
+            raise HTTPException(
+                status_code=400,
+                detail="A new highlight needs a book, a chapter and a selection")
+        highlight_id = store_highlight(
+            req.book_id, req.chapter_index, req.selected_text,
+            block_id=req.block_id,
+            context_before=req.context_before, context_after=req.context_after)
+    else:
+        _require_highlight(highlight_id)
     analysis_id = get_db().save_analysis(
-        req.highlight_id, req.analysis_type, req.prompt, req.response)
-    return {"analysis_id": analysis_id, "status": "success"}
+        highlight_id, req.analysis_type, req.prompt, req.response)
+    return {"analysis_id": analysis_id, "highlight_id": highlight_id,
+            "status": "success"}
 
 
 @router.post("/api/ai/discussion/start")

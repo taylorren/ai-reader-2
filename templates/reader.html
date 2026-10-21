@@ -58,12 +58,6 @@
                 <a href="/" class="btn">返回书架</a>
             </div>
             {% else %}
-            <!-- Shown once when a saved position was restored, so the reader
-                 knows the page did not open at the top by accident. -->
-            <div id="resume-notice" class="resume-notice" hidden>
-                <span id="resume-text"></span>
-                <button id="resume-dismiss" class="icon-btn" title="关闭">×</button>
-            </div>
             <main class="chapter-holder">
                 <iframe id="chapter-frame" class="chapter-frame" sandbox="allow-same-origin"
                         src="{{ initial_src }}" title="{{ title }}"></iframe>

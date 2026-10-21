@@ -183,3 +183,42 @@ def test_ai_writes_need_a_real_highlight(isolated_client):
                                json={"response": "x"}).status_code == 404
     assert isolated_client.delete("/api/ai/delete/999").status_code == 404
 
+
+def test_saving_without_a_highlight_creates_it_with_the_analysis(
+        isolated_client, isolated, upload, db):
+    """The reader's mark is stored only with content — never on its own.
+
+    The reader explains a selection and saves the explanation; the highlight
+    is created in the same act, from the selection the save carries.
+    """
+    slug = upload()
+    saved = isolated_client.post("/api/ai/save", json={
+        "analysis_type": "fact_check", "prompt": "the plate",
+        "response": "an explanation", "book_id": slug, "chapter_index": 0,
+        "selected_text": "The first paragraph mentions a plate",
+        "block_id": "c0000/b0003"})
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["highlight_id"] is not None
+    highlight = db.get_highlight(body["highlight_id"])
+    assert highlight["book_id"] == slug
+    assert highlight["selected_text"] == "The first paragraph mentions a plate"
+    assert highlight["block_id"] == "c0000/b0003"
+    assert highlight["chapter_path"] == "OEBPS/ch1.xhtml"
+    assert db.get_analysis(body["analysis_id"])["response"] == "an explanation"
+
+
+def test_saving_a_new_highlight_needs_a_selection(isolated_client, isolated,
+                                                  upload, db):
+    """A refused save stores nothing: no bare highlight is left behind."""
+    slug = upload()
+    missing_selection = isolated_client.post("/api/ai/save", json={
+        "analysis_type": "comment", "response": "x",
+        "book_id": slug, "chapter_index": 0, "selected_text": "   "})
+    assert missing_selection.status_code == 400
+    assert db.highlights_for(slug) == []
+    unknown_book = isolated_client.post("/api/ai/save", json={
+        "analysis_type": "comment", "response": "x",
+        "book_id": "ghost", "chapter_index": 0, "selected_text": "text"})
+    assert unknown_book.status_code == 404
+

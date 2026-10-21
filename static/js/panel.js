@@ -71,14 +71,28 @@ window.ReaderPanel = (function () {
         node._timer = setTimeout(() => { node.className = "toast"; }, 2500);
     }
 
+    // FastAPI answers a validation failure (422) with a *list* of field errors,
+    // not one string. Naming the field and the reason keeps a client/server
+    // mismatch diagnosable — the panel used to collapse every 422 into
+    // "请求失败", which is what a stale backend looked like from the browser.
+    function errorMessage(payload, response) {
+        const detail = payload && payload.detail;
+        if (typeof detail === "string") return detail;
+        if (Array.isArray(detail) && detail.length) {
+            return detail.map((item) => {
+                const field = (item.loc || [])
+                    .filter((part) => part !== "body").join(".");
+                return field ? `${field}: ${item.msg}` : item.msg;
+            }).join("; ");
+        }
+        return response.statusText || "请求失败";
+    }
+
     async function api(path, options) {
         const response = await fetch(path, options);
         let payload = null;
         try { payload = await response.json(); } catch (error) { payload = null; }
-        if (!response.ok) {
-            const detail = (payload && payload.detail) || response.statusText;
-            throw new Error(typeof detail === "string" ? detail : "请求失败");
-        }
+        if (!response.ok) throw new Error(errorMessage(payload, response));
         return payload;
     }
 
@@ -149,6 +163,7 @@ window.ReaderPanel = (function () {
         el("discussion-log").innerHTML = "";
         el("discussion-input-row").hidden = true;
         el("discussion-input").value = "";
+        setDeleteLabel(false);
         showButtons({});
     }
 
@@ -157,6 +172,12 @@ window.ReaderPanel = (function () {
             const button = el("panel-" + name);
             button.hidden = !visible[name];
         }
+    }
+
+    // Before a save the delete button is a cancel: nothing is stored yet, so
+    // there is no highlight to remove. After a save it removes the highlight.
+    function setDeleteLabel(saved) {
+        el("panel-delete").textContent = saved ? "删除高亮" : "取消";
     }
 
     function setBusy(busy) {
@@ -331,24 +352,9 @@ window.ReaderPanel = (function () {
 
     // -- actions -------------------------------------------------------------
 
-    async function ensureHighlight() {
-        if (state.highlightId) return state.highlightId;
-        const selection = state.selection;
-        const payload = await api("/api/highlight", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                book_id: state.slug,
-                chapter_index: state.index,
-                selected_text: selection.text,
-                block_id: selection.block_id,
-                context_before: selection.context_before,
-                context_after: selection.context_after,
-            }),
-        });
-        state.highlightId = payload.highlight_id;
-        return state.highlightId;
-    }
+    // A highlight is created only when the reader saves content for it (see
+    // saveCurrent): choosing an action, explaining the text and then walking
+    // away must leave no mark behind.
 
     async function handleAction(action) {
         const selection = state.selection;
@@ -364,12 +370,6 @@ window.ReaderPanel = (function () {
         state.selection = selection;
         el("panel-selected").textContent = selection.text;
         openPanel(KIND_LABELS[action] || "AI 分析");
-        try {
-            await ensureHighlight();
-        } catch (error) {
-            toast(error.message, "error");
-            return;
-        }
         if (action === "comment") {
             startComment();
         } else if (action === "discussion") {
@@ -536,18 +536,33 @@ window.ReaderPanel = (function () {
             response = input ? input.value.trim() : "";
         }
         if (!response) { toast("没有可保存的内容"); return; }
+        const selection = state.selection || {};
         try {
-            await api("/api/ai/save", {
+            // The mark and its content are saved together: with no highlight
+            // yet, the selection travels with the analysis and the server
+            // creates the highlight in the same act. An explanation that is
+            // never saved therefore leaves no highlight behind.
+            const payload = await api("/api/ai/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     highlight_id: state.highlightId,
                     analysis_type: analysisType,
-                    prompt: state.selection ? state.selection.text : "",
+                    prompt: selection.text || "",
                     response: response,
+                    book_id: state.slug,
+                    chapter_index: state.index,
+                    selected_text: selection.text || "",
+                    block_id: selection.block_id || null,
+                    context_before: selection.context_before || "",
+                    context_after: selection.context_after || "",
                 }),
             });
+            if (payload && payload.highlight_id) {
+                state.highlightId = payload.highlight_id;
+            }
             state.saved = true;
+            setDeleteLabel(true);
             toast("已保存到数据库");
             el("panel-save").hidden = true;
             await refreshHighlights();
@@ -801,6 +816,7 @@ window.ReaderPanel = (function () {
         if (!(highlight.analyses || []).length) {
             body.innerHTML = '<div class="panel-hint">这条高亮还没有批注。</div>';
         }
+        setDeleteLabel(true);
         showButtons({ delete: true });
     }
 
