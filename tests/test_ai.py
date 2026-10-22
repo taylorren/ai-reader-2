@@ -42,7 +42,8 @@ def test_analyze_maps_ai_failures_to_502(isolated_client, monkeypatch):
 
 
 def test_analyze_returns_the_response(isolated_client, monkeypatch):
-    async def fake_fact_check(text, context="", provider="ollama"):
+    async def fake_fact_check(text, context_before="", context_after="",
+                              provider="ollama"):
         return f"explained: {text}"
 
     monkeypatch.setattr(service(), "fact_check", fake_fact_check)
@@ -58,7 +59,8 @@ def test_analyze_returns_the_response(isolated_client, monkeypatch):
 def test_the_provider_override_wins(isolated_client, monkeypatch):
     import routers
 
-    async def fake_fact_check(text, context="", provider="ollama"):
+    async def fake_fact_check(text, context_before="", context_after="",
+                              provider="ollama"):
         return provider
 
     monkeypatch.setattr(service(), "fact_check", fake_fact_check)
@@ -70,7 +72,8 @@ def test_the_provider_override_wins(isolated_client, monkeypatch):
 
 
 def test_start_discussion_seeds_the_history(isolated_client, monkeypatch):
-    async def fake_overview(text, provider="ollama"):
+    async def fake_overview(text, context_before="", context_after="",
+                            provider="ollama"):
         return "an overview"
 
     monkeypatch.setattr(service(), "discussion_overview", fake_overview)
@@ -221,4 +224,100 @@ def test_saving_a_new_highlight_needs_a_selection(isolated_client, isolated,
         "analysis_type": "comment", "response": "x",
         "book_id": "ghost", "chapter_index": 0, "selected_text": "text"})
     assert unknown_book.status_code == 404
+
+
+# -- the selection travels with its context (REVIEW P1-3 / T3) -------------
+
+# A pronoun-first selection: 他們 has no antecedent inside it, which is the
+# case the reader reported. The referent is in the sentence before.
+BEFORE = "他們的研究取徑延續了《國家為什麼會失敗》的問題意識，"
+SELECTION = "他們偏好制度分析。"
+AFTER = "這使本書把焦點放在制度而不是文化上。"
+
+
+def captured_prompts(monkeypatch):
+    """Every prompt the service hands to `_call`, with the model call stubbed.
+
+    The prompt is what the model is actually asked, so asserting on it is the
+    only way to see whether the context made the trip.
+    """
+    prompts = []
+
+    async def capture(prompt, provider="ollama", history=None):
+        prompts.append(prompt)
+        return "(stub)"
+
+    monkeypatch.setattr(service(), "_call", capture)
+    return prompts
+
+
+def test_the_context_reaches_the_fact_check_prompt(isolated_client, monkeypatch):
+    """The selection used to travel alone, so a pronoun was answered by
+    guessing its referent (REVIEW P1-3)."""
+    prompts = captured_prompts(monkeypatch)
+    response = isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "fact_check", "selected_text": SELECTION,
+        "context_before": BEFORE, "context_after": AFTER, "provider": "ollama"})
+    assert response.status_code == 200
+    prompt = prompts[-1]
+    assert BEFORE in prompt and AFTER in prompt
+    assert "【选中的文本】" in prompt
+    # Labelled in reading order, so the model is told which part it is being
+    # asked about rather than reading one glued-together run of text.
+    assert prompt.index(BEFORE) < prompt.index(SELECTION) < prompt.index(AFTER)
+
+
+def test_the_context_reaches_the_discussion_prompt(isolated_client, monkeypatch):
+    """深入讨论 was the worst case: the panel did not put the context on the
+    wire at all, and discussion_overview had no parameter to receive it."""
+    prompts = captured_prompts(monkeypatch)
+    response = isolated_client.post("/api/ai/discussion/start", json={
+        "selected_text": SELECTION, "context_before": BEFORE,
+        "context_after": AFTER, "provider": "ollama"})
+    assert response.status_code == 200
+    prompt = prompts[-1]
+    assert BEFORE in prompt and AFTER in prompt
+    assert "【选中的文本】" in prompt
+
+
+def test_the_context_reaches_the_discussion_analysis_prompt(
+        isolated_client, monkeypatch):
+    prompts = captured_prompts(monkeypatch)
+    isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "discussion", "selected_text": SELECTION,
+        "context_before": BEFORE, "context_after": AFTER, "provider": "ollama"})
+    assert BEFORE in prompts[-1] and AFTER in prompts[-1]
+
+
+def test_without_context_the_prompt_is_the_bare_selection(
+        isolated_client, monkeypatch):
+    """Nothing to show: the prompt stays what it was, rather than gaining an
+    empty, labelled block."""
+    prompts = captured_prompts(monkeypatch)
+    isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "fact_check", "selected_text": SELECTION,
+        "provider": "ollama"})
+    prompt = prompts[-1]
+    assert SELECTION in prompt
+    assert "（上下文，仅供参考）" not in prompt
+    assert "【选中的文本】" not in prompt
+
+
+def test_the_excerpt_labels_the_selection_between_its_halves():
+    from ai_service import CONTEXT_SPAN, _excerpt
+
+    excerpt = _excerpt("SEL", "A" * (CONTEXT_SPAN + 50), "B" * (CONTEXT_SPAN + 50))
+    assert excerpt.count("A") == CONTEXT_SPAN          # bounded, not the whole run
+    assert excerpt.count("B") == CONTEXT_SPAN
+    assert excerpt.startswith("（上下文，仅供参考）\n上文：…")
+    assert "\n【选中的文本】SEL\n" in excerpt
+    assert excerpt.endswith("…")                       # the cut is marked
+
+    # One side alone is still labelled, and still names the selection.
+    assert _excerpt("SEL", "", "after") == (
+        "（上下文，仅供参考）\n【选中的文本】SEL\n下文：after…")
+    assert _excerpt("SEL", "before", "") == (
+        "（上下文，仅供参考）\n上文：…before\n【选中的文本】SEL")
+    # Nothing to show: the caller sends the bare selection.
+    assert _excerpt("SEL") == ""
 

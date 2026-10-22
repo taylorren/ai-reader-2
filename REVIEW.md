@@ -50,7 +50,7 @@ recipes are in Appendix A.
 |---|---|---|---|---|
 | P1-1 | High | Front-end | Every toast notification is invisible ✔ applied | S |
 | P1-2 | High | Routing / slugs | Titles containing `#` (or `%`) break every link to the book ✔ applied | S |
-| P1-3 | Medium | AI | The AI gets the selection but never the surrounding context | S |
+| P1-3 | Medium | AI | The AI gets the selection but never the surrounding context ✔ applied | S |
 | P1-4 | High | Front-end | Editing a note flattens it to one line | M |
 | P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights | M |
 | P1-6 | High | Reading state | Following an in-book link never saves progress | S |
@@ -231,12 +231,12 @@ that claim false for those titles.
 
 ---
 
-### P1-3 · The AI gets the selection but never the surrounding context
+### P1-3 · The AI gets the selection but never the surrounding context ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** AI
 *(rated High in the first pass; lowered after the reader's challenge and the A/B below showed the
 workflow completes — what is inert is the feature, not the reading experience)*
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `ai_service.py:96-115` (`fact_check`), `:117-151` (`discuss`), `:153-165`
 (`discussion_overview`); `routers/ai.py:124-128, 164-165`; `static/js/panel.js:394, 433-437`;
@@ -304,6 +304,51 @@ used, delete them (with `AnalyzeRequest.highlight_id`) so the API stops claiming
 
 **Verify:** T3 — assert the context reaches the mocked service *and* appears in the prompt; then
 re-run the A/B above on the same selection and check that the referent is resolved.
+
+**Applied (2026-10-23, `ai_service.py` + `routers/ai.py` + `static/js/panel.js` + tests):**
+
+* `ai_service.py` — `CONTEXT_SPAN = 300` and `_excerpt(selected, before, after, span)`: the three
+  parts labelled (`上文` / `【选中的文本】` / `下文`), each side bounded and the cut marked with `…`,
+  and `""` when there is no context. `fact_check`, `discuss` **and** `discussion_overview` take
+  `context_before`/`context_after` and put `_excerpt(...) or text` where the bare `{text}` used to
+  be — so the excerpt *replaces* the selection rather than being added beside it (no duplication),
+  and with no context the prompt is byte-for-byte what it was.
+* `routers/ai.py` — `AnalyzeRequest.context` (the joined string) becomes the two halves;
+  `DiscussionStartRequest` gains them; both routes pass them through. The unused `highlight_id`
+  is gone from `AnalyzeRequest`, `DiscussionStartRequest`, `DiscussionContinueRequest` and
+  `DiscussionSummarizeRequest`, and `panel.js` no longer sends it: the API was accepting four
+  fields it never read. Pydantic ignores unknown keys, so an older client is unaffected.
+* `static/js/panel.js` — `CONTEXT_SPAN = 300` replaces the 60-character slices in
+  `computeSelection` (the review's `span=300` cannot bite if the client sends 60), and
+  `context_before + context_after` no longer exists anywhere: the seam is gone at the source.
+* Tests: five in `tests/test_ai.py` — four assert the context reaches the *prompt* by stubbing
+  `_call` and capturing it, for `fact_check`, `discussion`, `discussion/start`, plus the
+  no-context case that must stay bare; one pins `_excerpt`'s labels, its bound, its marked cut and
+  the one-sided cases. Three existing fakes took the old signature and were updated.
+
+**The A/B, re-run as the Verify line asks** (自由的窄廊 ch. 3, `gpt-oss:120b-cloud`, the panel's
+default provider, same system prompt and temperature — only the excerpt differs):
+
+| | prompt A (before) | prompt B (after) |
+|---|---|---|
+| The body | the selection alone | `上文：…《自由的窄廊》奠基於…而是和前作《國家為什麼會失敗》一樣好讀。` + `【选中的文本】…` + `下文：…` |
+| Who 他們 is | **guessed** — "指代前文提到的某群体，常指社会科学家、政治学者等" (there is no 前文 in the prompt), and it ends by asking "**“他们”具体指谁**：是特定学者群体、研究机构，还是某本书/论文的作者？" | **resolved** — identifies 达龙·阿西莫格鲁 / 詹姆斯·罗宾逊 and their two books, and reads the sentence as *the authors' own method* ("作者偏好制度分析") |
+| The book | never named | named, with its predecessor |
+
+The defect is also visible in one line: the old payload was the two halves **joined**, so
+`before[-60:] + after[:60]` reads `…而是和前作《國家為什麼會失敗》一樣好讀。他們有幸生長在前者…` — a
+continuous sentence with the quoted words cut out of the middle, which is what the model would
+have been handed if the service had interpolated that field.
+
+**One correction to the finding:** "`context: str = ""` is accepted by all three service
+methods" — only `fact_check` and `discuss` accepted it. `discussion_overview` had no context
+parameter at all, which makes 深入讨论 slightly worse than the finding says: it is the reader's
+most-used action and the one that sent the least.
+
+**Note on stored data:** the panel now captures up to 300 characters per side instead of 60, so
+new highlights store a richer `context_before`/`context_after` — which is also what P2-10's
+context-aware painting will want. Existing rows keep their 60-character values; nothing is
+migrated and no schema changes.
 
 ---
 
@@ -1192,6 +1237,13 @@ no test asserts `analysis_type` is rejected on `/api/ai/save`, so P2-11 is invis
 **Fix:** capture the arguments passed to the mocked `fact_check`/`discuss` and assert the
 context appears in the prompt; add a 422 case for an unknown `analysis_type` on save.
 
+**Half applied with P1-3 (2026-10-23):** the prompt-content half landed —
+`tests/test_ai.py` now stubs `_call` and captures what the model is actually asked, for
+`fact_check`, `discussion` and `discussion/start`, plus a no-context case that pins the bare
+prompt, and a unit test for `_excerpt`. The 422-on-save half is P2-11's, which is not accepted,
+so this item stays **half applied** and its index row stays unmarked until that lands. Left
+unticked for the same reason.
+
 ---
 
 ### T4 · No cost test for the library render
@@ -1343,9 +1395,9 @@ out — use a longer timeout for the experiment.
 
 
 **Batch 1 — "the UI stops lying" (≈ half a day, all S):**
-~~P1-1 (toast CSS)~~ ✔ applied → ~~P1-2 (slug quoting + sanitising, with T2)~~ ✔ applied → P1-3
-(context into prompts, with T3) → P1-6 (save progress on in-frame navigation) → P2-2 (library
-join) → P2-3 (cache headers, with T5).
+~~P1-1 (toast CSS)~~ ✔ applied → ~~P1-2 (slug quoting + sanitising, with T2)~~ ✔ applied →
+~~P1-3 (context into prompts, with T3)~~ ✔ applied → P1-6 (save progress on in-frame navigation) →
+P2-2 (library join) → P2-3 (cache headers, with T5).
 
 **Batch 2 — "the boundaries hold" (≈ one day):**
 P2-1 (CSP on book files, with T5) → P2-6 (`get_db` lock) → P2-7 (`setdefault`) → P2-11

@@ -33,11 +33,17 @@ CONTEXT_LIMIT_HINT_AT = 20
 
 
 class AnalyzeRequest(BaseModel):
-    """A one-shot analysis over the selected text (nothing is stored)."""
-    highlight_id: int | None = None
+    """A one-shot analysis over the selected text (nothing is stored).
+
+    `context_before`/`context_after` are the two slices of surrounding text the
+    panel captures around the selection. They travel as halves rather than one
+    string because the selection sits *between* them: joining them would hand
+    the model a sentence with a hole where the quoted words belong (REVIEW P1-3).
+    """
     analysis_type: str              # 'fact_check' or 'discussion'
     selected_text: str
-    context: str = ""
+    context_before: str = ""
+    context_after: str = ""
     provider: str = "ollama_cloud"
 
 
@@ -67,14 +73,14 @@ class ConversationMessage(BaseModel):
 
 
 class DiscussionStartRequest(BaseModel):
-    highlight_id: int | None = None
+    """The opener of a discussion: the selection and its surroundings."""
     selected_text: str
-    context: str = ""
+    context_before: str = ""
+    context_after: str = ""
     provider: str = "ollama_cloud"
 
 
 class DiscussionContinueRequest(BaseModel):
-    highlight_id: int | None = None
     selected_text: str
     conversation_history: list[ConversationMessage]
     user_message: str
@@ -82,7 +88,6 @@ class DiscussionContinueRequest(BaseModel):
 
 
 class DiscussionSummarizeRequest(BaseModel):
-    highlight_id: int | None = None
     selected_text: str
     conversation_history: list[ConversationMessage]
     provider: str = "ollama_cloud"
@@ -121,11 +126,13 @@ async def analyze_text(req: AnalyzeRequest):
     service = get_ai_service()
     try:
         if req.analysis_type == "fact_check":
-            response = await service.fact_check(req.selected_text, req.context,
-                                                provider=provider)
+            response = await service.fact_check(
+                req.selected_text, context_before=req.context_before,
+                context_after=req.context_after, provider=provider)
         else:
-            response = await service.discuss(req.selected_text, req.context,
-                                             provider=provider)
+            response = await service.discuss(
+                req.selected_text, context_before=req.context_before,
+                context_after=req.context_after, provider=provider)
     except AIServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"response": response, "provider_used": provider, "status": "success"}
@@ -162,7 +169,8 @@ async def start_discussion(req: DiscussionStartRequest):
     provider = _provider(req.provider)
     try:
         overview = await get_ai_service().discussion_overview(
-            req.selected_text, provider=provider)
+            req.selected_text, context_before=req.context_before,
+            context_after=req.context_after, provider=provider)
     except AIServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {

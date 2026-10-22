@@ -22,6 +22,35 @@ class AIServiceError(Exception):
 
 PROVIDERS = ("ollama", "ollama_cloud")
 
+# How much of the selection's surroundings travels with it. The panel captures
+# the same span (CONTEXT_SPAN in panel.js), so the two bounds agree.
+CONTEXT_SPAN = 300
+
+
+def _excerpt(selected: str, before: str = "", after: str = "",
+             span: int = CONTEXT_SPAN) -> str:
+    """The selection with its surroundings, labelled — never the bare join.
+
+    `computeSelection` in the panel captures the text around a selection as two
+    slices with the selection cut out of the middle, so joining them hands the
+    model a sentence with a hole where the quoted words belong. Labelling the
+    three parts is what lets a short or pronoun-first selection — 他們, 该党,
+    因此 — be answered with its referent in view instead of guessed, and the
+    span keeps a long paragraph from swamping the selection (REVIEW P1-3).
+
+    Returns "" when there is no context to show; the caller then sends the bare
+    selection, which is exactly the prompt the reader got before.
+    """
+    if not (before or after):
+        return ""
+    lines = ["（上下文，仅供参考）"]
+    if before:
+        lines.append(f"上文：…{before[-span:]}")
+    lines.append(f"【选中的文本】{selected}")
+    if after:
+        lines.append(f"下文：{after[:span]}…")
+    return "\n".join(lines)
+
 
 def _system_prompt(provider: str) -> str:
     """The Chinese-output contract the reference app enforces per provider."""
@@ -93,12 +122,19 @@ class AIService:
 
     # -- the analysis kinds --------------------------------------------------
 
-    async def fact_check(self, text: str, context: str = "",
+    async def fact_check(self, text: str, context_before: str = "",
+                         context_after: str = "",
                          provider: str = "ollama") -> str:
-        """Explain and check the selected text: term, person, event, claim."""
+        """Explain and check the selected text: term, person, event, claim.
+
+        The selection travels inside the sentence it came from, so a pronoun
+        without an antecedent in the selection itself is resolved from the
+        text around it rather than guessed (REVIEW P1-3).
+        """
+        body = _excerpt(text, context_before, context_after) or text
         prompt = f"""请帮我理解以下内容：
 
-{text}
+{body}
 
 请根据内容类型提供相应的解释：
 
@@ -114,12 +150,18 @@ class AIService:
 - 如果内容不完整或无法判断，说明需要更多上下文"""
         return await self._call(prompt, provider=provider)
 
-    async def discuss(self, text: str, context: str = "",
+    async def discuss(self, text: str, context_before: str = "",
+                      context_after: str = "",
                       provider: str = "ollama") -> str:
-        """A structured, academic discussion of the selected text."""
+        """A structured, academic discussion of the selected text.
+
+        The excerpt goes in too: "核心论点解析" is about the author's argument,
+        which a fragment read on its own does not show (REVIEW P1-3).
+        """
+        body = _excerpt(text, context_before, context_after) or text
         prompt = f"""请对以下文本进行深入的学术性分析和讨论：
 
-{text}
+{body}
 
 请从以下几个维度展开分析：
 
@@ -150,13 +192,20 @@ class AIService:
 - 鼓励多角度、批判性的思考"""
         return await self._call(prompt, provider=provider)
 
-    async def discussion_overview(self, text: str,
+    async def discussion_overview(self, text: str, context_before: str = "",
+                                  context_after: str = "",
                                   provider: str = "ollama") -> str:
-        """The brief opener that seeds an interactive discussion."""
+        """The brief opener that seeds an interactive discussion.
+
+        This is the reader's most-used action (深入讨论), and it used to be the
+        one that sent the least: the panel did not even put the context on the
+        wire, and this method had no parameter to receive it (REVIEW P1-3).
+        """
+        body = _excerpt(text, context_before, context_after) or text
         prompt = f"""请对以下文本提供一个简要的概览分析（1-2段），突出关键论点、
 可能的争议点和值得深入探讨的问题：
 
-{text}
+{body}
 
 要求：
 - 简明扼要，控制在两段以内

@@ -26,6 +26,12 @@ window.ReaderPanel = (function () {
         highlight: "rgba(176, 111, 208, 0.34)",
     };
 
+    // How much text either side of a selection travels with it to the AI. The
+    // service bounds the same span (CONTEXT_SPAN in ai_service.py). 60 chars
+    // looked like enough and was not: the referent of a pronoun such as 他們 is
+    // often the sentence before the one selected (REVIEW P1-3).
+    const CONTEXT_SPAN = 300;
+
     const state = {
         slug: null,
         index: 0,
@@ -302,9 +308,9 @@ window.ReaderPanel = (function () {
         return {
             text: found.text,
             block_id: block.id,
-            context_before: block.text.slice(Math.max(0, at - 60), at),
+            context_before: block.text.slice(Math.max(0, at - CONTEXT_SPAN), at),
             context_after: block.text.slice(at + found.text.length,
-                                            at + found.text.length + 60),
+                                            at + found.text.length + CONTEXT_SPAN),
         };
     }
 
@@ -401,10 +407,12 @@ window.ReaderPanel = (function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    highlight_id: state.highlightId,
                     analysis_type: kind,
                     selected_text: state.selection.text,
-                    context: state.selection.context_before + state.selection.context_after,
+                    // The halves, never their join: the selection sits between
+                    // them, and the server labels the three parts (P1-3).
+                    context_before: state.selection.context_before || "",
+                    context_after: state.selection.context_after || "",
                     provider: state.provider,
                 }),
             });
@@ -444,8 +452,9 @@ window.ReaderPanel = (function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    highlight_id: state.highlightId,
                     selected_text: state.selection.text,
+                    context_before: state.selection.context_before || "",
+                    context_after: state.selection.context_after || "",
                     provider: state.provider,
                 }),
             });
@@ -492,7 +501,6 @@ window.ReaderPanel = (function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    highlight_id: state.highlightId,
                     selected_text: state.selection.text,
                     conversation_history: state.conversation,
                     user_message: message,
@@ -517,7 +525,6 @@ window.ReaderPanel = (function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    highlight_id: state.highlightId,
                     selected_text: state.selection.text,
                     conversation_history: state.conversation,
                     provider: state.provider,
