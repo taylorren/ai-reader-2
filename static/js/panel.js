@@ -342,7 +342,20 @@ window.ReaderPanel = (function () {
             requestClose(true);
         });
         doc.addEventListener("mouseup", async (event) => {
-            const selection = await computeSelection();
+            let selection;
+            try {
+                selection = await computeSelection();
+            } catch (error) {
+                // The block lookup is an enrichment — the menu is about the
+                // text the reader selected, and only saving a highlight wants
+                // a block id. So a refused /api/text must not take the menu
+                // down with it; degrade the way computeSelection does when it
+                // cannot identify the block at all.
+                console.warn("ai-reader: could not resolve the selection's block", error);
+                const found = selectionInFrame();
+                selection = found ? { text: found.text, block_id: null,
+                                      context_before: "", context_after: "" } : null;
+            }
             if (!selection) { hideContextMenu(); return; }
             state.selection = selection;
             const frameRect = frameEl().getBoundingClientRect();

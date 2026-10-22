@@ -85,6 +85,12 @@ CHAPTER_1 = """<?xml version="1.0" encoding="utf-8"?>
   <p>An endnote in chapter two<a epub:type="noteref" href="ch2.xhtml#endnote-1">2</a></p>
   <p>A reference to a note the book never defines<a epub:type="noteref" href="ch2.xhtml#no-such-note">3</a></p>
   <div id="local-note" epub:type="footnote"><p>The local note.</p></div>
+  <!-- A blank line, the CJK/InDesign way: a <p> holding only U+3000. epubx
+       reports it with text=None — the same value an uncaptioned figure
+       carries — so the reader's block filter must tolerate a text-less
+       paragraph. Appended last on purpose: the block ids above are the ones
+       stored highlights use, and appending cannot renumber them. -->
+  <p>　</p>
 </body>
 </html>
 """

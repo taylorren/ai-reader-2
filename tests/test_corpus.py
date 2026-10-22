@@ -101,3 +101,37 @@ def test_footnote_edges_match_the_mvp():
         f"{len(mismatches)} chapters differ: " + ", ".join(mismatches[:10])
     )
     assert compared, "no chapters were compared"
+
+
+def test_every_chapter_can_answer_the_text_api():
+    """The anchor filter must survive every real book, not just the fixtures.
+
+    `<p>　</p>` — a blank line to a CJK/InDesign export — is reported by epubx
+    with `text=None`, the same value an uncaptioned figure carries. A filter
+    that assumes `str` raises on it, and because the reader treats a failed
+    block lookup as fatal, the whole book loses its selection menu: 128 of 301
+    corpus books carry the shape, one of them in 40 of its 42 chapters. The
+    fixtures only carry it because this test's bug was found.
+    """
+    from booksource import Book
+    from routers.reader import anchor_blocks
+
+    failures = []
+    checked = 0
+    for path in corpus_books():
+        book = Book.open(path)
+        try:
+            if book.unsupported:
+                continue
+            for index in range(book.chapter_count):
+                checked += 1
+                try:
+                    anchor_blocks(book.blocks(index))
+                except Exception as exc:  # collected, not raised: report all
+                    failures.append(f"{path.name} chapter {index}: {exc!r}")
+        finally:
+            book.close()
+    assert not failures, (
+        f"{len(failures)} chapters raised: " + "; ".join(failures[:10])
+    )
+    assert checked, "no chapters were checked"

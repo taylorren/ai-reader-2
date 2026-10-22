@@ -35,6 +35,21 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 ANCHOR_KINDS = ("paragraph", "heading", "quote", "preformatted", "definition")
 
 
+def anchor_blocks(blocks) -> list[dict]:
+    """The blocks a highlight can anchor to: prose that carries selectable text.
+
+    `text` is `str | None` in epubx's model, and a block whose text collapses
+    away is `None` — the same value an uncaptioned figure carries. `<p>　</p>`,
+    the blank line a CJK/InDesign export sets with U+3000, is the common case
+    (1,168 of them in one corpus book, in 40 of its 42 chapters). Such a block
+    carries nothing a reader can select, so it is not an anchor: skip it rather
+    than calling `.strip()` on it. Calling `.strip()` raised, and the 500
+    silently disabled the reader's selection menu for the whole book (128 of
+    301 corpus books carry the shape).
+    """
+    return [block for block in blocks
+            if block["kind"] in ANCHOR_KINDS and (block["text"] or "").strip()]
+
 
 def content_type(media_type: str) -> str:
     """The Content-Type for a book file — the MVP's rule.
@@ -201,8 +216,7 @@ def chapter_text_api(slug: str, chapter_index: int):
     if not 0 <= chapter_index < book.chapter_count:
         raise HTTPException(status_code=404, detail="No such chapter")
     text = book.chapter_text(chapter_index)
-    blocks = [block for block in book.blocks(chapter_index)
-              if block["kind"] in ANCHOR_KINDS and block["text"].strip()]
+    blocks = anchor_blocks(book.blocks(chapter_index))
     return {
         "slug": slug,
         "chapter_index": chapter_index,
