@@ -112,18 +112,25 @@ def get_ai_service():
     return _ai_service
 
 
-# ---- Slug: ai-reader's algorithm, unchanged ----
+# ---- Slug: ai-reader's algorithm, plus the two URL-hostile characters ----
 
-_INVALID_FILENAME_CHARS = '<>:"/\\|?*'
+# Characters a filesystem cannot carry, plus the two a URL cannot carry
+# literally in a path segment: `#` opens a fragment, and a raw `%` is an
+# invalid escape. A slug is the title verbatim, so a title like `C# in Depth`
+# used to be unreachable from its own card — `href="/read/C# in Depth"` asks
+# the server for `/read/C`. Slugging them out is the source-level half of the
+# fix; every template and redirect also quotes the slug (REVIEW P1-2).
+_INVALID_FILENAME_CHARS = '<>:"/\\|?*#%'
 
 
 def sanitize_folder_name(name: str) -> str:
     """Title → safe folder name, preserving Unicode (Chinese titles included).
 
-    Characters a filesystem cannot carry become `_`; leading and trailing
-    dots and spaces are trimmed; the name is capped at 100 characters. The
-    same title always yields the same slug, so a re-uploaded book keeps its
-    identity and therefore its annotations.
+    Characters a filesystem cannot carry — and the two a URL cannot carry
+    literally, `#` and `%` — become `_`; leading and trailing dots and spaces
+    are trimmed; the name is capped at 100 characters. The same title always
+    yields the same slug, so a re-uploaded book keeps its identity and
+    therefore its annotations.
     """
     for char in _INVALID_FILENAME_CHARS:
         name = name.replace(char, "_")

@@ -104,9 +104,11 @@ working. `chapter_path` and `block_id` are added, not substituted.
 
 ### Book identity
 
-The slug algorithm is copied from ai-reader verbatim (title → safe name, `_2`,
+The slug algorithm is copied from ai-reader (title → safe name, `_2`,
 `_3`… on collision), so a re-uploaded book keeps its `book_id` and therefore its
-annotations.
+annotations. One deliberate departure: `#` and `%` are slugged out too (REVIEW
+P1-2) — both are legal in a filename but not in a URL path segment, and a slug
+is what lands in hrefs.
 
 ### Routes
 
@@ -261,7 +263,10 @@ Each phase is independently shippable and verifiable.
    re-upload.
 3. Because the slug algorithm is copied and `chapter_index` is retained,
    re-uploading the same book restores highlights, analyses and progress with no
-   data migration.
+   data migration. The exception is a title containing `#` or `%`: its slug
+   changes (see Book identity), so those books keep their old slug and folder —
+   reachable, via quoting — but a re-upload under the new rule lands as a
+   separate book.
 4. New columns are added with the same idempotent `ALTER TABLE` pattern
    ai-reader already uses.
 

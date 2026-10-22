@@ -49,6 +49,42 @@ def test_reader_js_only_looks_up_ids_the_shell_has(isolated_client, isolated):
     assert not missing, f"reader.js looks up ids the shell lacks: {missing}"
 
 
+def test_every_toast_class_has_a_rule_in_reader_css(isolated_client):
+    """The same class of bug as the id guard above, for CSS classes: `toast()`
+    builds its className from literals in panel.js, and every one of them must
+    have a rule in the stylesheet the reader page loads. The toast shipped with
+    `className = "toast visible"` and no `.toast.visible` rule, so every message
+    the reader showed — saves, deletes, AI failures, the named "本章有 N 条高亮
+    未能定位" warning — stayed at `opacity: 0`: silent.
+
+    Scoped to the toast rather than to every class in the reader scripts: some
+    classes are painted into the frame (which loads no shell stylesheet, e.g.
+    `reader-highlight` / `hl-*`) or belong to another page's stylesheet
+    (`.action-link`, REVIEW P3-2), so a blanket guard would fail on unrelated,
+    deliberate cases.
+    """
+    import re
+
+    script = isolated_client.get("/static/js/panel.js").text
+    stylesheet = isolated_client.get("/static/css/reader.css").text
+
+    # The class literals `toast()` assigns ...
+    body = re.search(r"function toast\([^)]*\)\s*\{(.*?)\n    \}", script, re.S)
+    assert body, "toast() not found in panel.js — update this guard with it"
+    classes = set()
+    for literal in re.findall(r'className = "([^"]*)"', body.group(1)):
+        classes.update(literal.split())
+    # ... plus the optional `kind` at every call site (`toast(msg, "error")`).
+    classes.update(re.findall(r'toast\([^)]*,\s*"([^"]+)"\s*\)', script))
+
+    # If the extraction ever stops finding what is there, fail loudly instead of
+    # passing on an empty set.
+    assert {"toast", "visible"} <= classes, f"toast() classes changed: {classes}"
+    missing = [name for name in sorted(classes)
+               if not re.search(rf"\.{re.escape(name)}(?![\w-])", stylesheet)]
+    assert not missing, f"toast() sets classes reader.css never styles: {missing}"
+
+
 def test_the_shell_serves_the_books_own_document(isolated_client, isolated):
     slug = upload(isolated_client, isolated)
     response = isolated_client.get(f"/read/{slug}/0")

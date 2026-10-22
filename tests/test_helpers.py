@@ -30,6 +30,14 @@ def test_sanitize_replaces_characters_filenames_cannot_carry():
     assert sanitize_folder_name("a/b:c") == "a_b_c"
 
 
+def test_sanitize_slugs_out_the_characters_a_url_cannot_carry():
+    """`#` and `%` are URL-hostile rather than filesystem-hostile, and a slug
+    lands in hrefs — so they go too (REVIEW P1-2). A slug that keeps them is
+    only safe while every href quotes it."""
+    assert sanitize_folder_name("C# in Depth") == "C_ in Depth"
+    assert sanitize_folder_name("100% Pure") == "100_ Pure"
+
+
 def test_sanitize_preserves_unicode_titles():
     assert sanitize_folder_name("三体") == "三体"
 

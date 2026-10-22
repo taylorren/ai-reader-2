@@ -98,7 +98,9 @@ def read_redirect(slug: str):
     if progress:
         book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
         index = min(progress["chapter_index"], book.chapter_count - 1)
-    return RedirectResponse(f"/read/{slug}/{index}", status_code=307)
+    # The slug is quoted: `#` in a Location header is read by the browser as the
+    # start of a fragment, so `/read/C# in Depth/0` sent it to `/read/C`.
+    return RedirectResponse(f"/read/{quote(slug, safe='')}/{index}", status_code=307)
 
 
 @router.get("/read/{slug}/{chapter_index}")

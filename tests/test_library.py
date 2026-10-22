@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,15 @@ def upload(client, path, name=None):
         "/upload",
         files={"file": (name or path.name, path.read_bytes(), "application/epub+zip")},
     )
+
+
+def book_links(page: str) -> list[str]:
+    """Every `/read/…` and `/highlights/…` href the page emits, deduplicated.
+
+    The library card, the reader shell and the highlights view all build these
+    from the slug, so this is what a URL-hostile title breaks (REVIEW P1-2).
+    """
+    return sorted(set(re.findall(r'href="(/(?:read|highlights)/[^"]*)"', page)))
 
 
 def test_upload_lists_metadata_in_one_step(isolated_client, isolated, db):
@@ -183,3 +193,64 @@ def test_library_progress_spans_the_book_not_the_current_chapter(
     isolated_client.post("/api/progress", json={
         "book_id": slug, "chapter_index": 1, "scroll_percent": 90.0})
     assert 'data-progress="95"' in isolated_client.get("/").text
+
+
+# -- URL-hostile titles (REVIEW P1-2 / T2) --------------------------------
+
+def test_a_title_a_url_cannot_carry_is_slugged_out(isolated_client, isolated):
+    """`#` opens a fragment and a raw `%` is an invalid escape, so neither may
+    survive into a slug: `href="/read/C# in Depth"` asks the server for
+    `/read/C`, which 404s the book from its own card."""
+    response = upload(isolated_client,
+                      write_epub(isolated / "hash.epub", title="C# in Depth"))
+    assert response.json()["slug"] == "C_ in Depth"
+    upload(isolated_client, write_epub(isolated / "pct.epub", title="100% Pure"))
+
+    page = isolated_client.get("/").text
+    assert 'href="/read/C_%20in%20Depth"' in page
+    assert 'href="/highlights/C_%20in%20Depth"' in page
+    assert 'href="/read/100_%20Pure"' in page
+
+    links = book_links(page)
+    assert len(links) == 4, links      # two books × (read + highlights)
+    for href in links:
+        assert "#" not in href, f"unquoted # in {href}"
+        assert isolated_client.get(href).status_code == 200
+
+
+def test_a_slug_stored_before_the_fix_is_still_linked_safely(
+        isolated_client, isolated, monkeypatch):
+    """The sanitise half cannot repair rows already in the database, so the
+    quoting half has to carry them. A library uploaded before P1-2 keeps a
+    `C# in Depth` slug — that is this test's starting point — and every link
+    the app emits for it must be percent-encoded, including the resume
+    redirect's `Location` (an unquoted `#` there sends the browser to
+    `/read/C`)."""
+    import routers.library
+    from routers import sanitize_folder_name
+
+    # Upload through the pre-fix rule, so the row and the folder on disk carry
+    # the hostile slug exactly as an existing library's do.
+    monkeypatch.setattr(routers.library, "sanitize_folder_name", lambda name: name)
+    slug = upload(isolated_client,
+                  write_epub(isolated / "legacy.epub", title="C# in Depth")).json()["slug"]
+    monkeypatch.setattr(routers.library, "sanitize_folder_name", sanitize_folder_name)
+    assert slug == "C# in Depth"
+
+    page = isolated_client.get("/").text
+    assert 'href="/read/C%23%20in%20Depth"' in page
+    assert 'href="/highlights/C%23%20in%20Depth"' in page
+
+    for href in book_links(page):
+        response = isolated_client.get(href, follow_redirects=False)
+        assert response.status_code in (200, 307), f"{href} -> {response.status_code}"
+        if response.status_code == 307:
+            assert response.headers["location"] == "/read/C%23%20in%20Depth/0"
+        # The journey the reader actually makes: card link → reader shell.
+        assert isolated_client.get(href).status_code == 200
+
+    # The reader shell's own link out, and the highlights view's link back.
+    shell = isolated_client.get("/read/C%23%20in%20Depth/0").text
+    assert 'href="/highlights/C%23%20in%20Depth"' in shell
+    view = isolated_client.get("/highlights/C%23%20in%20Depth").text
+    assert 'href="/read/C%23%20in%20Depth"' in view

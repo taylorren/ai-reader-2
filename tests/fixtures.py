@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 CONTAINER = """<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -119,14 +120,24 @@ COUNTING_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
-def write_epub(path) -> Path:
-    """A two-chapter book with footnotes, an image, CSS, a cover and a nav TOC."""
+def write_epub(path, title: str | None = None) -> Path:
+    """A two-chapter book with footnotes, an image, CSS, a cover and a nav TOC.
+
+    `title` overrides the OPF's `<dc:title>`. The slug is the title verbatim,
+    so passing `C# in Depth` or `100% Pure` is how a test reaches the
+    URL-hostile case (REVIEW P1-2 / T2). The title is XML-escaped, so `&` and
+    `<` are safe to pass.
+    """
+    opf = OPF
+    if title is not None:
+        opf = OPF.replace("<dc:title>Fixture Book</dc:title>",
+                          f"<dc:title>{escape(title)}</dc:title>")
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         # mimetype must be first and stored, per the OCF spec.
         zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
                     compress_type=zipfile.ZIP_STORED)
         zf.writestr("META-INF/container.xml", CONTAINER)
-        zf.writestr("OEBPS/content.opf", OPF)
+        zf.writestr("OEBPS/content.opf", opf)
         zf.writestr("OEBPS/nav.xhtml", NAV)
         zf.writestr("OEBPS/style.css", "body { margin: 0; }")
         zf.writestr("OEBPS/ch1.xhtml", CHAPTER_1)

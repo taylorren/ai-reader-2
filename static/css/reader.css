@@ -622,6 +622,13 @@ body.dark-mode .toc-caret:hover { color: #f3ead7; }
     pointer-events: none;
     transition: opacity 0.2s, transform 0.2s;
 }
+/* `toast()` in panel.js sets `className = "toast visible"` (plus an optional
+   `error` kind). Without these two rules the toast stayed at `opacity: 0`, so
+   every message the reader shows — saves, deletes, AI failures, "AI 正在思考中…"
+   and the named "本章有 N 条高亮未能定位" warning — was invisible. The pair is
+   pinned by tests/test_reader.py::test_every_toast_class_has_a_rule_in_reader_css. */
+.toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error { background: rgba(150, 40, 40, 0.95); }
 /* An image clicked in the book: a shell overlay that shows it at its own
    size — never scaled to fit the reading column — so a plate or map can be
    read in full. The dimmed surround scrolls when the image is larger than

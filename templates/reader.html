@@ -89,7 +89,7 @@
                 </div>
                 <div class="panel-tools">
                     <a id="panel-highlights-link" class="panel-link"
-                       href="/highlights/{{ slug }}">全部高亮 ↗</a>
+                       href="/highlights/{{ slug | urlencode }}">全部高亮 ↗</a>
                     <select id="provider-select" class="font-select" title="AI 提供方">
                         <option value="ollama">本地 Ollama</option>
                         <option value="ollama_cloud">云端 Ollama</option>

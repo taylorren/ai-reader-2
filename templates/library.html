@@ -50,7 +50,7 @@
                             {% endif %}
                         </div>
                         {% else %}
-                        <a href="/read/{{ book.slug }}" class="book-cover-link">
+                        <a href="/read/{{ book.slug | urlencode }}" class="book-cover-link">
                             <div class="book-cover">
                                 {% if book.cover_url %}
                                 <img src="{{ book.cover_url }}" alt="{{ book.title }}"
@@ -84,12 +84,12 @@
                             {% endif %}
                             <div class="book-actions">
                                 {% if not book.unsupported %}
-                                <a href="/read/{{ book.slug }}" class="btn">浏览本书</a>
+                                <a href="/read/{{ book.slug | urlencode }}" class="btn">浏览本书</a>
                                 {% endif %}
                                 <div class="menu-wrap">
                                     <button class="menu-btn" @click.stop="toggleMenu($event)">⋮</button>
                                     <div class="dropdown-menu">
-                                        <a class="dropdown-item" href="/highlights/{{ book.slug }}">高亮与批注</a>
+                                        <a class="dropdown-item" href="/highlights/{{ book.slug | urlencode }}">高亮与批注</a>
                                         <div class="dropdown-item" @click.stop="toggleCompleted($event)">
                                             {% if book.is_completed %}Mark as Incomplete{% else %}Mark as Completed{% endif %}
                                         </div>
