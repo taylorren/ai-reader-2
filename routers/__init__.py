@@ -167,8 +167,17 @@ def next_free_folder(directory: Path, name: str, taken=()) -> Path:
 
 # ---- Word count and reading time ----
 
-LATIN_WORD_RE = re.compile(r"\b\w+\b", re.UNICODE)
-CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+# The CJK blocks, in one place: the word count needs them twice — once to count
+# characters, once to *exclude* them from the word pattern.
+CJK_RANGES = "\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+
+# A word: word characters that are not CJK. The old `\b\w+\b` matched a run of
+# Chinese as a single "word" as well as counting its characters, so every
+# paragraph was counted twice — once per run, once per character at half weight
+# (REVIEW P2-4). Excluding CJK rather than whitelisting A-Z keeps accented Latin
+# (`café`) and numerals (`2024`) counting, exactly as they did before.
+LATIN_WORD_RE = re.compile(rf"[^\W{CJK_RANGES}]+", re.UNICODE)
+CJK_CHAR_RE = re.compile(rf"[{CJK_RANGES}]")
 
 WORDS_PER_MINUTE = 230  # mixed Chinese/English reading, per ai-reader
 

@@ -147,8 +147,9 @@ def write_epub(path, title: str | None = None) -> Path:
     return Path(path)
 
 
-def write_counting_epub(path) -> Path:
-    """A one-chapter book whose text is exactly 'Hello world 汉字'."""
+def write_counting_epub(path, text: str = "Hello world 汉字") -> Path:
+    """A one-chapter book whose text is exactly `text`."""
+    chapter = COUNTING_CHAPTER.replace("Hello world 汉字", escape(text))
     opf = """<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -169,7 +170,7 @@ def write_counting_epub(path) -> Path:
                     compress_type=zipfile.ZIP_STORED)
         zf.writestr("META-INF/container.xml", CONTAINER)
         zf.writestr("OEBPS/content.opf", opf)
-        zf.writestr("OEBPS/c.xhtml", COUNTING_CHAPTER)
+        zf.writestr("OEBPS/c.xhtml", chapter)
     return Path(path)
 
 

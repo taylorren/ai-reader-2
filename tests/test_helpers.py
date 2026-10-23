@@ -119,9 +119,31 @@ def counting_book(tmp_path_factory):
 
 
 def test_word_count_counts_latin_words_and_halfweight_cjk(counting_book):
-    # 'Hello world 汉字': three \w+ tokens, of which the two CJK characters
-    # count as half a word each — 3 + 1.
-    assert estimate_book_word_count(counting_book) == 4
+    # 'Hello world 汉字': two Latin words, plus two CJK characters at half a
+    # word each — 2 + 1. It was 4 while `\b\w+\b` also matched the CJK run as a
+    # word of its own (REVIEW P2-4).
+    assert estimate_book_word_count(counting_book) == 3
+
+
+def test_a_cjk_run_is_not_also_counted_as_a_latin_word(tmp_path):
+    """The finding's own check: a pure-CJK book is exactly its character count
+    halved, with no per-run word on top."""
+    book = Book.open(write_counting_epub(tmp_path / "cjk.epub", text="这是中文" * 3))
+    try:
+        assert estimate_book_word_count(book) == 6      # 12 CJK characters / 2
+    finally:
+        book.close()
+
+
+def test_accented_latin_and_numerals_still_count(tmp_path):
+    """Excluding CJK must not exclude the rest of the alphabet: `café` and
+    `2024` were words before the fix and are words after it."""
+    book = Book.open(write_counting_epub(
+        tmp_path / "latin.epub", text="café 2024 Straße"))
+    try:
+        assert estimate_book_word_count(book) == 3
+    finally:
+        book.close()
 
 
 def test_reading_time_is_at_least_one_minute():

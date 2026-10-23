@@ -57,7 +57,7 @@ recipes are in Appendix A.
 | P2-1 | High | Security | Book files are served at the app origin with no CSP ✔ applied | S |
 | P2-2 | Medium | Performance | The library page is N+1 ✔ applied | S |
 | P2-3 | Medium | Performance | No caching headers on `/book/**` ✔ applied | S |
-| P2-4 | Medium | Metadata | CJK word count double counts | S |
+| P2-4 | Medium | Metadata | CJK word count double counts ✔ applied | S |
 | P2-5 | Medium | Concurrency | The book cache can close a book another request is using | M |
 | P2-6 | Medium | Concurrency | `get_db()` is not thread-safe ✔ applied | S |
 | P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
@@ -686,10 +686,10 @@ the validator** so a cached chapter cannot survive it.
 
 ---
 
-### P2-4 · CJK word count double counts
+### P2-4 · CJK word count double counts ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Metadata
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/__init__.py:151-169`; test that pins the behaviour: `tests/test_helpers.py:71`.
 
@@ -718,6 +718,32 @@ LATIN_WORD_RE = re.compile(r"[A-Za-z]+(?:['’\-][A-Za-z]+)*")
 (optionally add `[0-9]+` if numerals should count). Update the test's expectation and comment.
 
 **Verify:** `estimate_book_word_count` on a pure-CJK fixture equals `round(chars / 2)`.
+
+**Applied (2026-10-23, `routers/__init__.py` + `tests/`):** the word pattern no longer matches CJK.
+One deliberate deviation from the fix's snippet, in the reader's favour:
+
+```python
+CJK_RANGES = "\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+LATIN_WORD_RE = re.compile(rf"[^\W{CJK_RANGES}]+", re.UNICODE)
+CJK_CHAR_RE = re.compile(rf"[{CJK_RANGES}]")
+```
+
+The review suggests `[A-Za-z]+(?:['’\-][A-Za-z]+)*` and notes numerals could be added back. That
+whitelist would also have dropped every accented Latin word — `café`, `Straße`, `naïve` — which
+`\b\w+\b` counted before, so a French or German book would have *lost* words to fix a Chinese
+double count. Excluding the CJK blocks from `\w` instead fixes exactly the reported defect and
+changes nothing else: accented letters, digits and underscores all still count, and a CJK run is
+no longer also a word. The ranges now live in one constant, used by both patterns.
+
+Three tests: the existing one updated (`'Hello world 汉字'` is **3**, not 4 — two words plus two
+characters at half weight, and its comment no longer claims three `\w+` tokens); a pure-CJK book
+equals `round(chars / 2)` (the Verify line); and accented Latin plus numerals still count, which is
+what a whitelist would have broken.
+
+**Stored values are not migrated.** `word_count` is written at upload, so the four books in the
+developer's library keep their inflated numbers (707,455 for 剑桥中华民国史 and so on) until they
+are uploaded again. Nothing reads the number as anything but a display string, and a re-upload
+refreshes it — the same path that already restores annotations.
 
 ---
 
@@ -1669,7 +1695,7 @@ out — use a longer timeout for the experiment.
 **Batch 2 — "the boundaries hold" (≈ one day):**
 ~~P2-1 (CSP on book files, with T5)~~ ✔ applied → ~~P2-6 (`get_db` lock)~~ ✔ applied →
 ~~P2-7 (`setdefault`)~~ ✔ applied → ~~P2-11 (`Literal` validation)~~ ✔ applied → P2-12 (WAL +
-`_session`) → P2-4 (word count + test) → P2-9 (`/api/text`).
+`_session`) → ~~P2-4 (word count + test)~~ ✔ applied → P2-9 (`/api/text`).
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
 ~~P1-4 (textarea editing)~~ ✔ applied → ~~P1-5 (frame keydown + menu semantics)~~ ✔ applied →
