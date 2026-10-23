@@ -3,6 +3,10 @@
    the book's scripts never run). Layout mirrors the reference reader:
    collapsible TOC sidebar, slim bar, chapter frame. */
 
+// The pure helpers live in reader-core.js (loaded first), shared with
+// panel.js and unit-tested in Node — REVIEW T1.
+const { clampSize, fileURL, tocKey } = window.ReaderCore;
+
 const app = document.getElementById("reader-app");
 const frame = document.getElementById("chapter-frame");
 const tocList = document.getElementById("toc-list");
@@ -26,23 +30,12 @@ const state = {
     size: clampSize(parseInt(localStorage.getItem("reader-font-size") || "19", 10)),
 };
 
-function clampSize(size) {
-    return Math.max(12, Math.min(48, Number.isFinite(size) ? size : 19));
-}
-
-const prefix = "/book/" + encodeURIComponent(BOOK.slug) + "/";
-
 // The same directory, decoded. The server builds srcs with Python's `quote`,
 // which escapes "(" and ")" as %28/%29; `encodeURIComponent` leaves them
 // literal — so an encoded-form comparison silently failed for any slug with
 // parentheses (most translated titles have them) and the frame-load handler
 // bailed before wiring the panel. Compare decoded paths instead.
 const bookPrefix = "/book/" + BOOK.slug + "/";
-
-function fileURL(path, anchor) {
-    const encoded = path.split("/").map(encodeURIComponent).join("/");
-    return prefix + encoded + (anchor ? "#" + encodeURIComponent(anchor) : "");
-}
 
 // The heading the reader asked for but the frame has not reached yet. A TOC
 // click changes `frame.src` while the old document is still on screen, so the
@@ -54,7 +47,7 @@ function load(index, anchor) {
     index = Math.max(0, Math.min(BOOK.spine.length - 1, index));
     BOOK.index = index;
     pendingAnchor = anchor || null;
-    frame.src = fileURL(BOOK.spine[index], anchor);
+    frame.src = fileURL(BOOK.slug, BOOK.spine[index], anchor);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
     saveProgress(0);
     mark();
@@ -143,10 +136,6 @@ function syncTocHighlight() {
    reader's own toggles are remembered per book. */
 
 const TOC_STORE_KEY = "tocExpanded:" + BOOK.slug;
-
-function tocKey(node) {
-    return (node.href || "") + "|" + (node.anchor || "") + "|" + (node.label || "");
-}
 
 function loadExpanded() {
     try {

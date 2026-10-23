@@ -9,6 +9,11 @@ Highlights anchor to the library's block ids (`c0000/b0003`), matched to the
 frame's elements by text; the selected text is what a reader sees wrapped. */
 
 window.ReaderPanel = (function () {
+    // The pure helpers, shared with reader.js and unit-tested in Node
+    // (static/js/reader-core.js, REVIEW T1).
+    const { escapeHtml, normalizedIndex, offsetToPoint, findBlockForText,
+            blockElement } = window.ReaderCore;
+
     const KIND_LABELS = {
         fact_check: "解释说明",
         discussion: "深入讨论",
@@ -58,12 +63,6 @@ window.ReaderPanel = (function () {
     // and fall back to `window.BOOK` for when the shell sets it that way.
     function bookData() {
         return (typeof BOOK !== "undefined" && BOOK) || window.BOOK || {};
-    }
-
-    function escapeHtml(text) {
-        const node = document.createElement("div");
-        node.textContent = text == null ? "" : String(text);
-        return node.innerHTML;
     }
 
     function renderMarkdown(markdown) {
@@ -279,18 +278,6 @@ window.ReaderPanel = (function () {
             `/api/highlights/${encodeURIComponent(state.slug)}/${index}`);
         state.highlights[index] = payload.highlights || [];
         return state.highlights[index];
-    }
-
-    function findBlockForText(blocks, text) {
-        // The smallest block that contains the selection is the anchor.
-        let best = null;
-        for (const block of blocks) {
-            if (block.text.includes(text) &&
-                (!best || block.text.length < best.text.length)) {
-                best = block;
-            }
-        }
-        return best;
     }
 
     function selectionInFrame() {
@@ -670,52 +657,6 @@ window.ReaderPanel = (function () {
             parent.removeChild(mark);
             parent.normalize();
         }
-    }
-
-    const normalize = (text) => (text || "").replace(/\s+/g, " ").trim();
-
-    function blockElement(doc, block) {
-        const target = normalize(block.text);
-        if (!target) return null;
-        const candidates = doc.querySelectorAll(
-            "p, h1, h2, h3, h4, h5, h6, blockquote, pre, dt, dd, li, td");
-        for (const node of candidates) {
-            if (normalize(node.textContent) === target) return node;
-        }
-        return null;
-    }
-
-    // A whitespace-insensitive index: the value, plus the source offset each
-    // of its characters came from. A row migrated from the old app carries
-    // text that app extracted, whose spacing need not match this DOM's —
-    // matching the normalised form is what lets those highlights paint.
-    function normalizedIndex(text) {
-        let value = "";
-        const map = [];
-        let lastWasSpace = false;
-        for (let i = 0; i < text.length; i++) {
-            if (/\s/.test(text[i])) {
-                if (value && !lastWasSpace) { value += " "; map.push(i); lastWasSpace = true; }
-            } else {
-                value += text[i];
-                map.push(i);
-                lastWasSpace = false;
-            }
-        }
-        if (lastWasSpace) { value = value.slice(0, -1); map.pop(); }
-        return { value, map };
-    }
-
-    function offsetToPoint(nodes, offset) {
-        let position = 0;
-        for (const node of nodes) {
-            const length = node.nodeValue.length;
-            if (offset <= position + length) {
-                return { node, offset: offset - position };
-            }
-            position += length;
-        }
-        return null;
     }
 
     function wrapText(doc, root, text, highlight) {

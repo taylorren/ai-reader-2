@@ -81,7 +81,7 @@ recipes are in Appendix A.
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent | S |
 | P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
 | P3-15 | Low | API | Dead API and schema surface | S |
-| T1 | High | Testing | No front-end tests | L |
+| T1 | High | Testing | No front-end tests ✔ applied (browser smoke still open) | L |
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
 | T3 | Medium | Testing | No tests on prompt content or save validation | S |
 | T4 | Low | Testing | No cost test for the library render | S |
@@ -1221,10 +1221,10 @@ the next reader does not delete them.
 
 ## Test gaps
 
-### T1 · No front-end tests
+### T1 · No front-end tests ✔ applied — steps 1 and 2, and step 3 without a browser
 
 **Severity:** High · **Effort:** L · **Area:** Testing
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `tests/` (13 Python files, zero JS); `static/js/reader.js` (927 lines),
 `static/js/panel.js` (846 lines).
@@ -1246,6 +1246,72 @@ neither would be caught by the suite. Every future change to `panel.js` relies o
    `escapeHtml` into a small module and unit-test them in Node (`node --test` + `jsdom`).
 3. One Playwright smoke: open a book → select text → 解释说明 (AI stubbed) → 保存 → reload →
    the mark is painted and the toast is visible.
+
+**Applied (2026-10-23) — steps 1 and 2 in full, step 3 without the browser:**
+
+**Step 1, the class guard** (`tests/test_reader.py`). The id guard it extends now also covers
+`panel.js`'s `el("…")` lookups and `reader-core.js`; the class guard beside it walks **every page
+the app serves** — the library, the reader shell and the highlights view — collects the class
+literals from the scripts that page loads (`className = "…"`, `classList.add/remove/toggle/
+contains`, and the `class="…"` inside HTML a script builds) and asserts each one has a rule in
+the stylesheets that page loads. Two details make it honest rather than decorative:
+
+* **The frame's stylesheet counts.** `reader-highlight`, `hl-*`, `flash` and `reader-resume-line`
+  are painted into the book's document, so they are styled by the CSS `reader.js` injects there,
+  not by `reader.css`. The guard reads those `const *_CSS = \`…\`` literals as part of the
+  reader page's CSS surface — which is what turns "28 class literals, 2 unstyled" into a guard
+  with a single exemption.
+* **A prefix is expanded, not exempted.** `"reader-highlight hl-" + kind` yields the bare prefix
+  `hl-`; the guard expands it against the kinds in `KIND_COLORS` and requires `hl-fact_check`,
+  `hl-discussion`, `hl-comment`, `hl-highlight` to be styled. A new highlight kind without a
+  colour therefore fails.
+
+One exemption survives, and it is P3-2: `action-link`, the reader panel's 编辑 button, is styled
+only in `highlights.css`. The guard also fails when an exemption stops being needed, so fixing
+P3-2 forces its removal with a message that says so. Both guards fail loudly if their extraction
+stops finding anything (a vacuity check), because a guard that quietly matches nothing is worse
+than none.
+
+**Verified by breaking it.** With `.toast.visible` deleted from `reader.css` — the P1-1 state —
+the guard reports `['visible']`. With an id typo in `panel.js` (`el("panel-saveX")`) the id guard
+reports `['panel-saveX']`, which the pre-T1 guard could not see, since it only read `reader.js`.
+With `.action-link` styled (P3-2 as if fixed) the staleness check fires.
+
+**Step 2, the module** (`static/js/reader-core.js` + `tests/js/reader-core.test.js`). The helpers
+are out of `panel.js` and `reader.js` and into one file loaded first (and added to
+`asset_version`, so the cache-buster covers it):
+
+| Moved | Why it is worth pinning |
+|---|---|
+| `normalizedIndex`, `offsetToPoint`, `findBlockForText`, `blockElement`, `normalizeText` | The whitespace-insensitive matching that paints a highlight into a book whose extracted text does not match the DOM — the most intricate logic in the project. |
+| `escapeHtml` | Now an explicit escape map rather than a `createElement` trick: it also escapes the quotes, so the result is safe in an attribute too. |
+| `fileURL` | Takes the slug as an argument instead of closing over it, which is what makes the encoding testable — including the parenthesis quirk that broke the frame-load handler. |
+| `clampSize`, `tocKey` | The reader's settings clamp and the TOC's localStorage identity. |
+
+Thirteen `node --test` cases, **no new dependency** — Node's own runner, and a stub document
+where one is needed (`blockElement` takes the document it searches as an argument, so a stub
+suffices). `tests/test_frontend.py` runs them through pytest and skips cleanly when `node` is
+absent, the way `test_corpus.py` skips without `EPUBX_CORPUS`. Two of my own expectations were
+wrong when first run and the tests corrected them: the collapsed space in `normalizedIndex` maps
+to the *first* whitespace of the run, and `encodeURIComponent` leaves `(`/`)` literal — which is
+precisely the quirk `reader.js`'s comment describes.
+
+**Step 3, the flow — without a browser** (`tests/js/panel-flow.test.js` + `tests/js/dom-stub.js`).
+Four tests drive the real `panel.js` through its own wiring: clicking 解释说明 in the shell's
+context menu, saving, failing to save, and writing a note. They assert the requests the browser
+would send (the context halves and never their join — a P1-3 regression guard; the block id and
+selection that become the mark), that a successful save sets `#toast` to `toast visible`, and
+that a failed one sets `toast visible error` and leaves the save on offer. The stub document is
+what T1's step 3 called a browser for; it is honest about the boundary: the text *selection* is
+handed in (a real Range needs a real document), and nothing is rendered.
+
+**What is still open, and it needs a decision.** The Playwright smoke itself. There is no usable
+browser in this environment — `/usr/bin/chromium-browser` is the snap shim and the snap is not
+installed, so the only way to run one here is to add it: `playwright` in the venv plus a ~130 MB
+browser download, or a `package.json` with npm's Playwright beside uv. The test would then skip
+wherever no browser is installed, as the corpus tests do. Its marginal value over what landed is
+*rendering*: that the toast is actually on screen, that the mark is actually painted in the frame,
+that layout has not swallowed either. Worth doing deliberately, as its own change — say the word.
 
 ---
 
@@ -1326,7 +1392,8 @@ constant as books are added (e.g. upload 5 books, count ≤ 3).
   final boundary `Exception`); `close()` even makes post-close access benign rather than
   explosive. `test_booksource.py` covers the three footnote shapes the real corpus breaks on.
 * **Three tests guard whole classes of bug**, not just one incident — worth copying to the
-  front end: the reader-JS id lookup guard (`test_reader.py:37`), traversal tests at both the
+  front end: the served-asset guards (`test_reader.py`: the id lookup guard, and the class guard
+  T1 added beside it), traversal tests at both the
   route and adapter level (`test_book_route.py:64`, `test_booksource.py:119`), and the
   "book progress spans the book, not the chapter" test that pins an actually-reported bug
   (`test_library.py:171`).

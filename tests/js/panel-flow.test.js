@@ -1,0 +1,136 @@
+/* The reader's main flow, driven through the panel's own wiring — REVIEW T1.
+ *
+ * This is step 3 of T1 without a browser: select text → 解释说明 → 保存 →
+ * the mark exists and the toast is shown. The selection itself is the one thing
+ * a stub cannot make (the frame's own document and a real Range are needed), so
+ * the test hands `state.selection` in the shape the mouseup handler produces —
+ * see computeSelection() in panel.js. Everything after that is real: the menu
+ * item is clicked, the panel's listeners run, and the requests are the ones the
+ * browser would send.
+ *
+ * What it cannot see — layout, painted pixels, a real toast on screen — is what
+ * a Playwright smoke would add.
+ */
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const { createPage } = require("./dom-stub.js");
+
+const SELECTION = {
+    text: "The first paragraph mentions a plate",
+    block_id: "c0000/b0003",
+    context_before: "…《自由的窄廊》奠基於…",
+    context_after: " and then keeps going",
+};
+
+function scriptedPage() {
+    const page = createPage();
+    page.route(/\/api\/ai\/analyze$/, {
+        response: "## 解释\n\n这是一段解释。", provider_used: "ollama",
+        status: "success",
+    });
+    page.route(/\/api\/ai\/save$/, {
+        status: "success", analysis_id: 1, highlight_id: 42,
+    });
+    page.route(/\/api\/text\//, { blocks: [] });
+    page.route(/\/api\/highlights\//, { highlights: [] });
+    page.P.init();
+    page.P.setBook("Fixture Book");
+    page.P.setChapter(0);
+    page.P.state.selection = { ...SELECTION };
+    return page;
+}
+
+test("explaining a selection asks for the context and stores nothing yet", async () => {
+    const page = scriptedPage();
+    const item = page.menuItems.find((i) => i.dataset.action === "fact_check");
+    item.click();
+    await page.settle(); await page.settle();
+
+    const request = page.lastRequest(/\/api\/ai\/analyze$/);
+    assert.ok(request, "the analysis was requested");
+    assert.equal(request.method, "POST");
+    const body = page.body(request);
+    assert.equal(body.analysis_type, "fact_check");
+    assert.equal(body.selected_text, SELECTION.text);
+    // The halves, never their join: the selection sits between them (P1-3).
+    assert.equal(body.context_before, SELECTION.context_before);
+    assert.equal(body.context_after, SELECTION.context_after);
+    assert.equal(body.context, undefined);
+
+    // Nothing is stored by looking: a highlight is created only on save.
+    assert.equal(page.requests.filter((r) => /\/api\/ai\/save$/.test(r.url)).length, 0);
+
+    // The reply is rendered and the save button is offered.
+    assert.match(page.el("panel-body").innerHTML, /这是一段解释/);
+    assert.equal(page.el("panel-save").hidden, false);
+    assert.equal(page.el("panel-save").textContent, "保存到数据库");
+});
+
+test("saving it creates the mark with the selection and shows a visible toast", async () => {
+    const page = scriptedPage();
+    page.menuItems.find((i) => i.dataset.action === "fact_check").click();
+    await page.settle(); await page.settle();
+
+    page.el("panel-save").click();
+    await page.settle(); await page.settle();
+
+    const save = page.lastRequest(/\/api\/ai\/save$/);
+    assert.ok(save, "the save was requested");
+    const body = page.body(save);
+    assert.equal(body.analysis_type, "fact_check");
+    assert.equal(body.selected_text, SELECTION.text);
+    assert.equal(body.block_id, SELECTION.block_id);      // the mark's anchor
+    assert.equal(body.book_id, "Fixture Book");
+    assert.equal(body.chapter_index, 0);
+    assert.equal(body.response, "## 解释\n\n这是一段解释。");
+    assert.equal(body.context_before, SELECTION.context_before);
+
+    // The toast is what tells the reader it worked — and it is only visible
+    // because `.toast.visible` has a rule (P1-1); the class guard pins that
+    // half, this pins the class being applied at all.
+    assert.equal(page.el("toast").textContent, "已保存到数据库");
+    assert.equal(page.el("toast").className, "toast visible");
+
+    // The panel is now about a stored mark: no save button, a delete label.
+    assert.equal(page.el("panel-save").hidden, true);
+    assert.equal(page.el("panel-delete").textContent, "删除高亮");
+
+    // …and the chapter's highlights are fetched again, which is the repaint.
+    assert.ok(page.lastRequest(/\/api\/highlights\//), "the marks were refreshed");
+});
+
+test("a failed save keeps the panel open and says so", async () => {
+    const page = scriptedPage();
+    page.route(/\/api\/ai\/save$/, () => { throw new Error("nope"); });
+    page.menuItems.find((i) => i.dataset.action === "fact_check").click();
+    await page.settle(); await page.settle();
+
+    page.el("panel-save").click();
+    await page.settle(); await page.settle();
+
+    // The reader is told, and the save is still on offer: nothing was stored.
+    assert.equal(page.el("toast").className, "toast visible error");
+    assert.equal(page.el("panel-save").hidden, false);
+    assert.equal(page.el("panel-delete").textContent, "取消");
+});
+
+test("a note is stored as a comment, with the selection it marks", async () => {
+    const page = scriptedPage();
+    page.menuItems.find((i) => i.dataset.action === "comment").click();
+    await page.settle();
+
+    const box = page.el("comment-input");
+    assert.ok(box, "the note box is open");
+    assert.equal(box.focused, true);
+    assert.equal(page.el("panel-save").textContent, "保存笔记");
+    box.value = "第一段笔记。\n\n第二段笔记。";
+
+    page.el("panel-save").click();
+    await page.settle(); await page.settle();
+
+    const body = page.body(page.lastRequest(/\/api\/ai\/save$/));
+    assert.equal(body.analysis_type, "comment");
+    assert.equal(body.response, "第一段笔记。\n\n第二段笔记。");
+    assert.equal(page.el("toast").className, "toast visible");
+});

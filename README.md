@@ -13,6 +13,10 @@ uv run server.py      # http://127.0.0.1:8123
 uv run pytest -q
 ```
 
+`pytest` also runs the front end's pure logic: `tests/js/*.test.js` under Node's
+own test runner — no npm, no build step, no jsdom — and skips them cleanly when
+`node` is not installed. `node --test "tests/js/*.test.js"` runs them directly.
+
 Static assets are read from disk on every request, but Python is loaded once at
 startup: after editing a router or a model, restart the server
 (`systemctl restart reader3`). A running process serving the new `panel.js`

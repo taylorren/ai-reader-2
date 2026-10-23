@@ -1,10 +1,14 @@
 """P2: the reader shell, resume redirect, and the book API.
 
 Model A: the shell serves the book's own document in a sandboxed iframe —
-nothing from the book executes, and the shell rewrites nothing."""
+nothing from the book executes, and the shell rewrites nothing.
+
+The guards at the top are T1's: the served shell, its scripts and its
+stylesheets have to agree about the ids and classes they name."""
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from urllib.parse import unquote
@@ -14,6 +18,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fixtures import write_drm_epub, write_epub, write_sectioned_epub  # noqa: E402
+
+# Ids a script looks up that the shell cannot carry because the script creates
+# them itself.
+SCRIPT_MADE_IDS = {"comment-input"}
+
+# Classes a script names that its page's stylesheet deliberately does not
+# define, each with the reason. Adding one here is a decision; the guard fails
+# on a class that arrives without a reason, and on an entry that is no longer
+# needed — a stale allowlist is how a guard rots.
+UNSTYLED_CLASSES = {
+    # The reader panel's 编辑 button carries a class defined only in
+    # highlights.css, which the reader page does not load: the one unstyled
+    # control in the reader (REVIEW P3-2). Delete this entry when P3-2 lands.
+    "action-link",
+}
 
 
 def upload(client, isolated, builder=write_epub, name="fixture.epub"):
@@ -34,19 +53,142 @@ def test_the_library_link_resumes_or_starts_at_chapter_zero(
     assert unquote(response.headers["location"]) == f"/read/{slug}/0"
 
 
-def test_reader_js_only_looks_up_ids_the_shell_has(isolated_client, isolated):
+def test_the_scripts_only_look_up_ids_the_shell_has(isolated_client, isolated):
     """reader.js once died silently on a stale getElementById — the whole
     shell went dead (no TOC, no controls). This guards the whole class:
-    every literal id the script looks up must exist in the served shell."""
-    import re
+    every literal id the scripts look up must exist in the served shell.
 
+    T1 extended it to panel.js's `el("…")` lookups and to reader-core.js: the
+    same failure mode, in the scripts that own the panel."""
     slug = upload(isolated_client, isolated)
     shell = isolated_client.get(f"/read/{slug}/0").text
-    script = isolated_client.get("/static/js/reader.js").text
 
-    wanted = set(re.findall(r'getElementById\("([^"]+)"\)', script))
-    missing = [eid for eid in sorted(wanted) if f'id="{eid}"' not in shell]
-    assert not missing, f"reader.js looks up ids the shell lacks: {missing}"
+    wanted = set()
+    for path in ("/static/js/reader.js", "/static/js/panel.js",
+                 "/static/js/reader-core.js"):
+        script = isolated_client.get(path).text
+        wanted |= set(re.findall(r'getElementById\("([^"]+)"\)', script))
+        wanted |= set(re.findall(r'\bel\("([^"]+)"\)', script))
+
+    missing = [eid for eid in sorted(wanted - SCRIPT_MADE_IDS)
+               if f'id="{eid}"' not in shell]
+    assert not missing, f"the scripts look up ids the shell lacks: {missing}"
+    assert len(wanted) > 15, f"the id extraction found almost nothing: {wanted}"
+
+
+# -- the served front end's own contract (T1) ------------------------------
+
+def page_assets(client, page: str) -> tuple[list[str], list[str]]:
+    """A served page's own stylesheets and scripts, query strings stripped."""
+    sheets = [href.split("?")[0] for href in
+              re.findall(r'<link rel="stylesheet" href="([^"]+)"', page)]
+    scripts = [src.split("?")[0] for src in
+               re.findall(r'<script src="([^"]+)"', page)
+               if "/static/vendor/" not in src]
+    return sheets, scripts
+
+
+def css_classes(css: str) -> set[str]:
+    """Every class a stylesheet defines a rule for."""
+    return set(re.findall(r"\.([A-Za-z_][-\w]*)", css))
+
+
+def script_classes(script: str) -> tuple[set[str], set[str]]:
+    """(classes, prefixes) a script names in its own source.
+
+    `className = "toast visible"`, `classList.add("flash")`, the `class="…"`
+    inside HTML it builds, and a concatenated prefix such as
+    `"reader-highlight hl-" + kind` — the last returned as the bare prefix, for
+    the caller to expand against the kinds the script knows.
+    """
+    found = set()
+    for pattern in (r'className = "([^"]*)"',
+                    r'classList\.(?:add|remove|toggle|contains)\("([^"]+)"',
+                    r'class="([^"]+)"'):
+        for literal in re.findall(pattern, script):
+            found.update(literal.split())
+    found = {name for name in found if "$" not in name and "{" not in name}
+    return ({name for name in found if not name.endswith("-")},
+            {name for name in found if name.endswith("-")})
+
+
+def highlight_kinds(script: str) -> set[str]:
+    """The highlight kinds a script knows, from its KIND_COLORS table."""
+    block = re.search(r"KIND_COLORS = \{(.*?)\n    \};", script, re.S)
+    return set(re.findall(r"(\w+):", block.group(1))) if block else set()
+
+
+def test_every_class_the_scripts_name_has_a_rule_in_the_stylesheet_the_page_loads(
+        isolated_client, isolated):
+    """The class guard T1 asks for, extending the id guard above.
+
+    A class a script sets but no stylesheet defines is a silent no-op: the toast
+    shipped with `className = "toast visible"` and no `.toast.visible` rule, so
+    every notification the reader showed stayed invisible (P1-1).
+
+    The reader's frame is part of its stylesheet surface — the CSS reader.js
+    injects into the book's document is what styles the marks, the flash and the
+    resume rule — so it is collected here too. Every page the app serves is
+    checked, and the guard fails on an exemption that is no longer needed.
+    """
+    slug = upload(isolated_client, isolated)
+    pages = {f"/read/{slug}/0": "reader",
+             "/": "library",
+             f"/highlights/{slug}": "highlights"}
+
+    unstyled_anywhere = set()
+    named_anywhere = set()
+    for path, name in pages.items():
+        page = isolated_client.get(path).text
+        sheets, scripts = page_assets(isolated_client, page)
+        assert sheets and scripts, f"{name}: no stylesheets or scripts found"
+
+        css = "".join(isolated_client.get(sheet).text for sheet in sheets)
+        sources = [isolated_client.get(script).text for script in scripts]
+        if name == "reader":
+            # The frame's own stylesheet: the CSS the shell injects into the
+            # book's document, kept in reader.js as template literals.
+            for source in sources:
+                css += "\n".join(
+                    re.findall(r"const [A-Z_]+_CSS = `(.*?)`;", source, re.S))
+
+        styled = css_classes(css)
+        named, prefixes = set(), set()
+        kinds = set()
+        for source in sources:
+            classes, found_prefixes = script_classes(source)
+            named |= classes
+            prefixes |= found_prefixes
+            kinds |= highlight_kinds(source)
+
+        assert named, f"{name}: the class extraction found nothing at all"
+
+        # A prefix is not a class: `"hl-" + kind` builds one of the kinds the
+        # script knows, and each of those must have a rule — which is how a new
+        # highlight kind without a colour gets caught.
+        for prefix in sorted(prefixes):
+            assert kinds, f"{name}: {prefix!r} is a prefix but no kinds were found"
+            missing = sorted({prefix + kind for kind in kinds} - styled)
+            assert not missing, (
+                f"{name}: the scripts build these classes by prefix {prefix!r} "
+                f"but no stylesheet defines them: {missing}")
+
+        unstyled_anywhere |= named - styled
+        named_anywhere |= named
+        assert not named - styled - UNSTYLED_CLASSES, (
+            f"{name}: these classes are set by the page's scripts but no "
+            f"stylesheet the page loads defines them: "
+            f"{sorted(named - styled - UNSTYLED_CLASSES)}")
+
+    # A guard that quietly stops finding anything is worse than no guard.
+    assert len(named_anywhere) > 20, (
+        f"the class extraction found only {len(named_anywhere)} classes across "
+        f"three pages — check the patterns in script_classes()")
+
+    stale = UNSTYLED_CLASSES - unstyled_anywhere
+    assert not stale, (
+        f"these classes are exempt in UNSTYLED_CLASSES but every page now styles "
+        f"them — delete them: {sorted(stale)}")
 
 
 def test_every_toast_class_has_a_rule_in_reader_css(isolated_client):
@@ -228,16 +370,39 @@ def test_progress_rejects_a_bad_chapter_and_unknown_book(
     assert unknown.status_code == 404
 
 
-def test_the_shell_asset_version_covers_the_panel(isolated_client, isolated):
-    """panel.js must be in the cache-busting token, or a browser that has the
-    old copy keeps it — and the panel's fixes never arrive."""
+def test_the_shell_asset_version_covers_every_asset_it_loads(
+        isolated_client, isolated):
+    """Every script and stylesheet the shell loads must be in the cache-busting
+    token, or a browser that has an old copy keeps it — and the fixes never
+    arrive.
+
+    Derived from the served page rather than from a list kept here (T1): adding
+    a script to the shell without adding it to the router's list now fails this
+    test, which is exactly the drift it exists to catch.
+    """
     from routers import get_asset_version
 
     slug = upload(isolated_client, isolated)
     body = isolated_client.get(f"/read/{slug}/0").text
-    expected = str(get_asset_version(
-        "static/js/reader.js", "static/js/panel.js", "static/css/reader.css"))
-    assert expected in body
+    assets = [href for href in re.findall(
+        r'(?:src|href)="(/static/(?:js|css)/[^"]+)"', body)]
+    assert assets, "the shell loads no local assets"
+
+    token = str(get_asset_version(*(asset.split("?")[0].lstrip("/")
+                                    for asset in assets)))
+    unversioned = [asset for asset in assets if f"?v={token}" not in asset]
+    assert not unversioned, (
+        f"the shell's ?v= tokens do not match the token over the assets it loads "
+        f"(?v={token}) — is every asset in the router's get_asset_version list? "
+        f"{unversioned}")
+
+    # The order is load-bearing: panel.js and reader.js take their pure helpers
+    # from window.ReaderCore at load, so the module has to come first or the
+    # whole panel is dead.
+    order = [asset.split("?")[0] for asset in assets]
+    for dependent in ("/static/js/panel.js", "/static/js/reader.js"):
+        assert order.index("/static/js/reader-core.js") < order.index(dependent), (
+            f"reader-core.js must load before {dependent}")
 
 
 def test_the_shell_carries_a_highlight_deep_link(isolated_client, isolated):
