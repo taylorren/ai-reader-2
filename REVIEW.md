@@ -55,7 +55,7 @@ recipes are in Appendix A.
 | P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights | M |
 | P1-6 | High | Reading state | Following an in-book link never saves progress ✔ applied | S |
 | P2-1 | High | Security | Book files are served at the app origin with no CSP | S |
-| P2-2 | Medium | Performance | The library page is N+1 | S |
+| P2-2 | Medium | Performance | The library page is N+1 ✔ applied | S |
 | P2-3 | Medium | Performance | No caching headers on `/book/**` | S |
 | P2-4 | Medium | Metadata | CJK word count double counts | S |
 | P2-5 | Medium | Concurrency | The book cache can close a book another request is using | M |
@@ -84,7 +84,7 @@ recipes are in Appendix A.
 | T1 | High | Testing | No front-end tests ✔ applied (browser smoke still open) | L |
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
 | T3 | Medium | Testing | No tests on prompt content or save validation | S |
-| T4 | Low | Testing | No cost test for the library render | S |
+| T4 | Low | Testing | No cost test for the library render ✔ applied | S |
 | T5 | Low | Testing | No test pins response headers | S |
 
 **Counts:** 38 items — 7 High · 14 Medium · 17 Low — plus 5 test gaps (T1–T5).
@@ -561,10 +561,10 @@ A renders unchanged.
 
 ---
 
-### P2-2 · The library page is N+1
+### P2-2 · The library page is N+1 ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Performance
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/library.py:104-130` (`library_card`), specifically `:108`;
 `database.py:24-27` (`_connect` per call).
@@ -590,6 +590,23 @@ def books_with_progress(self) -> list[dict]:
 and pass the joined fields into `library_card()` / `book_percent()` instead of a second call.
 
 **Verify:** T4.
+
+**Applied (2026-10-23, `database.py` + `routers/library.py` + `tests/test_library.py`):**
+
+* `Database.books_with_progress()` — one `LEFT JOIN` over `reading_progress`, with the progress
+  columns aliased (`p_present`, `p_chapter`, `p_scroll`, `p_completed`). `p_present` is the point
+  of the alias: "no progress row" and "a row of zeroes" are different states, and the card has to
+  tell them apart (`has_progress`).
+* `library_card()` now takes the joined row and touches **no database at all** — the `get_db()`
+  import inside it is gone, which is the shape the finding asked for. `library_view()` reads
+  `books_with_progress()` instead of `list_books()`.
+* **T4 landed with it**: `test_the_library_page_costs_one_query_however_many_books` counts
+  `sqlite3.connect` calls across a five-book render. Against the pre-fix code it reports **6
+  connections for 5 books** (one `list_books` plus one per card); after, 1 — with the threshold at
+  3 so a future backfill has room without the test having to be loosened.
+* A second test pins the join's fidelity, since the per-book lookup it replaced also fed
+  `has_progress` and `is_completed`: a card with no progress row shows no summary, 90% of the last
+  chapter of two reads 95%, and marking complete still says so.
 
 ---
 
@@ -1389,6 +1406,11 @@ unticked for the same reason.
 **Fix:** wrap `sqlite3.connect` with a counter and assert the library page's connection count is
 constant as books are added (e.g. upload 5 books, count ≤ 3).
 
+**Applied with P2-2 (2026-10-23):**
+`tests/test_library.py::test_the_library_page_costs_one_query_however_many_books` counts
+`sqlite3.connect` calls across a five-book render and asserts ≤ 3. It reports 6 against the
+pre-P2-2 code and 1 after, which is the assertion T4 asked for.
+
 ---
 
 ### T5 · No test pins response headers
@@ -1529,7 +1551,8 @@ out — use a longer timeout for the experiment.
 **Batch 1 — "the UI stops lying" (≈ half a day, all S):**
 ~~P1-1 (toast CSS)~~ ✔ applied → ~~P1-2 (slug quoting + sanitising, with T2)~~ ✔ applied →
 ~~P1-3 (context into prompts, with T3)~~ ✔ applied →
-~~P1-6 (save progress on in-frame navigation)~~ ✔ applied → P2-2 (library join) → P2-3
+~~P1-6 (save progress on in-frame navigation)~~ ✔ applied → ~~P2-2 (library join)~~ ✔ applied →
+P2-3
 (cache headers, with T5).
 
 **Batch 2 — "the boundaries hold" (≈ one day):**

@@ -156,6 +156,28 @@ class Database:
         finally:
             conn.close()
 
+    def books_with_progress(self) -> list[dict]:
+        """Every book, with its progress joined on — one query, one connection.
+
+        A library card needs both, and asking per book opened a connection per
+        book: 299 books meant 299 of them on every render (REVIEW P2-2).
+        `p_present` distinguishes "no progress row" from "a row of zeroes".
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute("""
+                SELECT b.*,
+                       p.book_id IS NOT NULL AS p_present,
+                       p.chapter_index AS p_chapter,
+                       p.scroll_percent AS p_scroll,
+                       p.is_completed AS p_completed
+                FROM books b
+                LEFT JOIN reading_progress p ON p.book_id = b.slug
+            """).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
     def set_chapter_count(self, slug: str, chapter_count: int) -> None:
         """Record a book's spine length.
 

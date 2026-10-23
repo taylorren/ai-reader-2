@@ -46,7 +46,7 @@ def library_view(request: Request):
     """
     from . import get_db
 
-    rows = get_db().list_books()
+    rows = get_db().books_with_progress()
     backfill_chapter_counts(rows)
     cards = [library_card(row) for row in rows]
     return templates.TemplateResponse(
@@ -102,10 +102,17 @@ def book_percent(progress: dict | None, chapter_count: int) -> int:
 
 
 def library_card(row: dict) -> dict:
-    """One books row, shaped for a library card."""
-    from . import get_db
+    """One books row, shaped for a library card.
 
-    progress = get_db().get_progress(row["slug"])
+    The progress fields arrive joined onto the row (`books_with_progress`), so
+    shaping a card touches no database at all — it used to open a connection
+    per book, on every render (REVIEW P2-2).
+    """
+    progress = None
+    if row.get("p_present"):
+        progress = {"chapter_index": row["p_chapter"] or 0,
+                    "scroll_percent": row["p_scroll"] or 0.0,
+                    "is_completed": row["p_completed"]}
     title = row["title"] or row["slug"]
     word_count = row["word_count"] or 0
     return {

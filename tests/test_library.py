@@ -197,6 +197,58 @@ def test_library_progress_spans_the_book_not_the_current_chapter(
 
 # -- URL-hostile titles (REVIEW P1-2 / T2) --------------------------------
 
+def test_the_library_page_costs_one_query_however_many_books(
+        isolated_client, isolated, monkeypatch):
+    """The card used to ask the database for its own progress, and the database
+    opens a connection per call: 299 books meant 299 connections on every render
+    (REVIEW P2-2 / T4). The page is one joined query now, so the cost is flat.
+    """
+    import sqlite3
+
+    for index in range(5):
+        upload(isolated_client, write_epub(isolated / f"book{index}.epub",
+                                           title=f"Book {index}"))
+
+    opened = []
+    real_connect = sqlite3.connect
+
+    def counting_connect(*args, **kwargs):
+        opened.append(args[0] if args else None)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", counting_connect)
+    page = isolated_client.get("/")
+    assert page.status_code == 200
+    for index in range(5):
+        assert f"Book {index}" in page.text, f"book {index} is on the page"
+
+    # One for the joined rows; the slack is for a backfill, which is a no-op
+    # once every row carries its chapter_count.
+    assert len(opened) <= 3, (
+        f"the library page opened {len(opened)} connections for 5 books")
+
+
+def test_a_card_shows_whole_book_progress_from_the_joined_row(
+        isolated_client, isolated):
+    """The join must carry what the per-book lookup used to: a card with no
+    progress row is not "0% complete" but "no progress", and a completed one
+    says so."""
+    slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
+
+    fresh = isolated_client.get("/").text
+    assert 'data-progress="0"' in fresh
+    assert "progress-summary" not in fresh       # nothing to summarise yet
+
+    isolated_client.post("/api/progress", json={
+        "book_id": slug, "chapter_index": 1, "scroll_percent": 90.0})
+    resumed = isolated_client.get("/").text
+    assert 'data-progress="95"' in resumed       # 90% of the last of two
+    assert "progress-summary" in resumed
+
+    isolated_client.post(f"/api/books/{slug}/completion?completed=true")
+    assert "Completed" in isolated_client.get("/").text
+
+
 def test_a_title_a_url_cannot_carry_is_slugged_out(isolated_client, isolated):
     """`#` opens a fragment and a raw `%` is an invalid escape, so neither may
     survive into a slug: `href="/read/C# in Depth"` asks the server for
