@@ -74,7 +74,7 @@ recipes are in Appendix A.
 | P3-6 | Low | Routing | `read_redirect` can compute `chapter_index = -1` ✔ applied | S |
 | P3-7 | Low | Docs | Docstrings and SPEC that contradict the code ✔ applied | S |
 | P3-8 | Low | Dependencies | `httpx2` is a runtime dependency for a test-only need ✔ applied | S |
-| P3-9 | Low | AI | AI client is created per call; one `except` is unreachable | S |
+| P3-9 | Low | AI | AI client is created per call; one `except` is unreachable ✔ applied | S |
 | P3-10 | Low | Operations | No upload size cap and no staging-directory sweep | S |
 | P3-11 | Low | UX | The unsupported reason is only a tooltip ✔ applied | S |
 | P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats | S |
@@ -1293,10 +1293,10 @@ unaffected. The runtime list now names only what the app imports.
 
 ---
 
-### P3-9 · AI client is created per call, and one `except` is unreachable
+### P3-9 · AI client is created per call, and one `except` is unreachable ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** AI
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `ai_service.py:66-92`.
 
@@ -1316,6 +1316,25 @@ someone reading the block will assume provider errors are handled there.
 
 **Fix:** create one `httpx.AsyncClient` per `AIService` (or per event loop) and close it on
 shutdown; move `connection()` inside the `try` or delete the dead handler.
+
+**Applied (2026-10-23, `ai_service.py` + `server.py` + `tests/test_ai.py`):** both halves.
+
+* `AIService.client()` returns one `httpx.AsyncClient`, created on first use and reused — one
+  pool and one TLS context instead of one per call, which mattered most for a discussion (one call
+  per turn). It is keyed to the **event loop**, not just the service: an `AsyncClient` belongs to
+  the loop that built it, and the suite builds a loop per `TestClient`, so a single cached client
+  would be dead on the next test. `aclose()` releases it, and `server.py` now has a `lifespan`
+  whose shutdown calls it — the app stops, not each request.
+* The timeout is `OLLAMA_TIMEOUT` (default 60, unchanged) rather than a literal, so the cold-model
+  case the finding measured can be tuned without editing code. No retry was added: the finding
+  names one as an observation, and a retry policy is a decision (how many, how long, and whether a
+  duplicate call is acceptable) rather than a one-line fix.
+* `connection()` moved inside the `try`, so the `except AIServiceError: raise` handler that named
+  the case is live code instead of dead.
+
+Two tests: the client is the same object twice within one loop, `aclose()` closes it, and a new
+loop gets a live one; and an unknown provider still raises `AIServiceError` out of `_call`. The
+whole suite passes with the shared client, which is the part that could have gone wrong.
 
 ---
 

@@ -212,6 +212,53 @@ def test_a_conversation_turn_cannot_be_a_system_message(
     assert ok.status_code == 200, ok.text
 
 
+def test_the_ai_client_is_shared_within_a_loop_and_closed_on_shutdown():
+    """P3-9: `async with httpx.AsyncClient(...)` inside every call meant a new
+    connection pool and TLS context per request, and a discussion issues one call
+    per turn. The client is kept per event loop, because an AsyncClient belongs to
+    the loop that built it — one cached client would be dead on the next loop,
+    which is exactly what the app's tests build."""
+    import asyncio
+
+    from ai_service import AIService
+
+    service = AIService()
+
+    async def first_loop():
+        client = service.client()
+        return service.client() is client, client
+
+    same_object, client = asyncio.run(first_loop())
+    assert same_object is True, "the client is reused within a loop"
+
+    async def shutdown():
+        await service.aclose()
+        return client.is_closed
+
+    assert asyncio.run(shutdown()) is True, "aclose() releases it"
+
+    async def next_loop():
+        return service.client().is_closed
+
+    assert asyncio.run(next_loop()) is False, "a new loop gets a live client"
+
+
+def test_an_unknown_provider_raises_the_service_error():
+    """`connection()` raises before the request; `_call` must hand that out as an
+    AIServiceError rather than wrapping or losing it (the handler that did so was
+    dead code until P3-9)."""
+    import asyncio
+
+    from ai_service import AIService, AIServiceError
+
+    try:
+        asyncio.run(AIService()._call("some text", provider="openai"))
+    except AIServiceError as exc:
+        assert "openai" in str(exc)
+    else:
+        raise AssertionError("an unknown provider must raise AIServiceError")
+
+
 def test_editing_a_note_keeps_its_paragraphs(isolated_client, isolated,
                                              upload, db):
     """The editor is the panel's textarea, so an edit must round trip Markdown

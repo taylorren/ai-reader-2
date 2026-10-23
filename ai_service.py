@@ -11,6 +11,7 @@ Prompts ask for Simplified Chinese, matching the reference's output contract.
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import httpx
@@ -71,8 +72,34 @@ class AIService:
         self.api_key = api_key or os.getenv("OLLAMA_API_KEY", "ollama")
         self.model = os.getenv("OLLAMA_MODEL", "llama3")
         self.cloud_model = os.getenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b-cloud")
+        self.timeout = float(os.getenv("OLLAMA_TIMEOUT", "60"))
+        self._client: httpx.AsyncClient | None = None
+        self._client_loop = None
 
     # -- provider plumbing ---------------------------------------------------
+
+    def client(self) -> httpx.AsyncClient:
+        """The shared HTTP client: one pool, one TLS context, reused.
+
+        A client per call meant a new connection pool and handshake for every
+        request, and a discussion issues one call per turn (REVIEW P3-9). It is
+        kept per *event loop*, not per service: an AsyncClient belongs to the
+        loop that built it, and the app's tests build one loop per client — a
+        single cached client would be dead on the next one.
+        """
+        loop = asyncio.get_running_loop()
+        if (self._client is None or self._client.is_closed
+                or self._client_loop is not loop):
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client_loop = loop
+        return self._client
+
+    async def aclose(self) -> None:
+        """Release the client — on application shutdown, not per request."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
+        self._client_loop = None
 
     def connection(self, provider: str) -> tuple[str, str, str]:
         """(base_url, api_key, model) for a provider. Unknown → AIServiceError."""
@@ -95,30 +122,33 @@ class AIService:
     async def _call(self, prompt: str, provider: str = "ollama",
                     history: list[dict] | None = None) -> str:
         """One chat completion. Raises AIServiceError, never returns error text."""
-        base_url, api_key, model = self.connection(provider)
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                response = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": model,
-                        "messages": self._messages(prompt, provider, history),
-                        "temperature": 0.7,
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["choices"][0]["message"]["content"]
-            except httpx.HTTPError as exc:
-                raise AIServiceError(f"AI API调用失败: {exc}") from exc
-            except AIServiceError:
-                raise
-            except Exception as exc:
-                raise AIServiceError(f"AI 处理失败: {exc}") from exc
+        try:
+            # `connection()` is inside the try because it is the only raiser of
+            # AIServiceError before the request: the old code called it above the
+            # try and then caught the error below it, so that handler was dead
+            # code (REVIEW P3-9).
+            base_url, api_key, model = self.connection(provider)
+            response = await self.client().post(
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": self._messages(prompt, provider, history),
+                    "temperature": 0.7,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except httpx.HTTPError as exc:
+            raise AIServiceError(f"AI API调用失败: {exc}") from exc
+        except AIServiceError:
+            raise
+        except Exception as exc:
+            raise AIServiceError(f"AI 处理失败: {exc}") from exc
 
     # -- the analysis kinds --------------------------------------------------
 

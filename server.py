@@ -7,6 +7,7 @@ wins (see `load_env`).
 """
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -39,9 +40,23 @@ def load_env():
     print(f"✓ Loaded Ollama endpoint: {os.getenv('OLLAMA_BASE_URL', 'Not set')}")
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Release the AI client when the app stops.
+
+    It is shared for the app's lifetime (one pool, one TLS context), so it is
+    not closed per request — the loop that owns it is the one that closes it
+    (REVIEW P3-9).
+    """
+    yield
+    from routers import get_ai_service
+
+    await get_ai_service().aclose()
+
+
 load_env()
 
-app = FastAPI(title="ai-reader-2")
+app = FastAPI(title="ai-reader-2", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 # Register routers: each owns one area of the route table in SPEC.md.
