@@ -95,15 +95,16 @@ def save_progress(update: ProgressUpdate):
     row = db.get_book(update.book_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(update.book_id, BOOKS_DIR / row["path"])
-    if not 0 <= update.chapter_index < book.chapter_count:
-        raise HTTPException(status_code=400, detail="No such chapter")
+    with book_cache.borrow(update.book_id, BOOKS_DIR / row["path"]) as book:
+        if not 0 <= update.chapter_index < book.chapter_count:
+            raise HTTPException(status_code=400, detail="No such chapter")
+        chapter_path = book.spine[update.chapter_index]
     db.save_progress(
         update.book_id,
         update.chapter_index,
         scroll_percent=max(0.0, min(100.0, update.scroll_percent)),
         block_id=update.block_id,
-        chapter_path=book.spine[update.chapter_index],
+        chapter_path=chapter_path,
         seq=update.seq,
     )
     return {"status": "success"}

@@ -95,21 +95,26 @@ def book_file(request: Request, slug: str, path: str):
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    found = book.resource(path)
-    if found is None:
-        raise HTTPException(status_code=404, detail="No such file in the book")
-
-    etag = _book_etag(BOOKS_DIR / row["path"], path)
+    book_path = BOOKS_DIR / row["path"]
+    etag = _book_etag(book_path, path)
     headers = {
         "Content-Security-Policy": "script-src 'none'; object-src 'none'",
         "X-Content-Type-Options": "nosniff",
         "ETag": etag,
         "Cache-Control": "public, max-age=3600",
     }
+    # The revalidation path never opens the book: it needs the validator, which
+    # comes from the file, and a chapter turn that evicts the cache must not
+    # close a book another response is reading from (REVIEW P2-5).
     if _etag_matches(request.headers.get("if-none-match", ""), etag):
         return Response(status_code=304, headers=headers)
-    return Response(content=found.read(), media_type=content_type(found.media_type),
+
+    with book_cache.borrow(slug, book_path) as book:
+        found = book.resource(path)
+        if found is None:
+            raise HTTPException(status_code=404, detail="No such file in the book")
+        content = found.read()
+    return Response(content=content, media_type=content_type(found.media_type),
                     headers=headers)
 
 
@@ -148,12 +153,13 @@ def read_redirect(slug: str):
     index = 0
     progress = get_db().get_progress(slug)
     if progress:
-        book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
+        with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+            chapter_count = book.chapter_count
         # Clamped at both ends: a book with an empty spine (`chapter_count == 0`,
         # a malformed file that still opened) used to compute -1 and redirect to
         # `/read/{slug}/-1`, which nothing accepts — the one place where a named
         # failure became a bare 404 (REVIEW P3-6).
-        index = min(max(progress["chapter_index"], 0), max(book.chapter_count - 1, 0))
+        index = min(max(progress["chapter_index"], 0), max(chapter_count - 1, 0))
     # The slug is quoted: `#` in a Location header is read by the browser as the
     # start of a fragment, so `/read/C# in Depth/0` sent it to `/read/C`.
     return RedirectResponse(f"/read/{quote(slug, safe='')}/{index}", status_code=307)
@@ -214,36 +220,41 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    # The live value wins over the stored one: a file deleted or replaced behind
-    # the app's back still has a row saying it was readable, and `unsupported` is
-    # cheap to recompute here — the book is open either way (REVIEW P3-5).
-    unsupported = book.unsupported or row["unsupported"]
+    # Borrowed for the whole render: the shell's context reads the book's spine
+    # and TOC, and eviction must not close it half-way through (REVIEW P2-5).
+    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+        # The live value wins over the stored one: a file deleted or replaced
+        # behind the app's back still has a row saying it was readable, and
+        # `unsupported` is cheap to recompute here — the book is open either way
+        # (REVIEW P3-5).
+        unsupported = book.unsupported or row["unsupported"]
 
-    if not 0 <= chapter_index < book.chapter_count:
-        # No chapter to show. If the book has none at all, its named reason is
-        # what the reader needs — the library card cannot reach this page (it
-        # hides its 浏览本书 link), and a bare 404 says nothing (P3-5/P3-6).
-        if book.chapter_count == 0:
-            return templates.TemplateResponse(
-                request=request, name="reader.html",
-                context=shell_context(request, slug, row, book, 0,
-                                      unsupported or "unreadable book: no chapters"))
-        raise HTTPException(status_code=404, detail="No such chapter")
+        if not 0 <= chapter_index < book.chapter_count:
+            # No chapter to show. If the book has none at all, its named reason
+            # is what the reader needs — the library card cannot reach this page
+            # (it hides its 浏览本书 link), and a bare 404 says nothing
+            # (P3-5/P3-6).
+            if book.chapter_count == 0:
+                return templates.TemplateResponse(
+                    request=request, name="reader.html",
+                    context=shell_context(request, slug, row, book, 0,
+                                          unsupported
+                                          or "unreadable book: no chapters"))
+            raise HTTPException(status_code=404, detail="No such chapter")
 
-    progress = get_db().get_progress(slug)
-    saved_percent = 0.0
-    saved_block_id = None
-    if progress and progress["chapter_index"] == chapter_index:
-        saved_percent = progress["scroll_percent"] or 0.0
-        saved_block_id = progress["block_id"]
+        progress = get_db().get_progress(slug)
+        saved_percent = 0.0
+        saved_block_id = None
+        if progress and progress["chapter_index"] == chapter_index:
+            saved_percent = progress["scroll_percent"] or 0.0
+            saved_block_id = progress["block_id"]
 
-    return templates.TemplateResponse(
-        request=request,
-        name="reader.html",
-        context=shell_context(request, slug, row, book, chapter_index,
-                              unsupported, saved_percent, saved_block_id),
-    )
+        return templates.TemplateResponse(
+            request=request,
+            name="reader.html",
+            context=shell_context(request, slug, row, book, chapter_index,
+                                  unsupported, saved_percent, saved_block_id),
+        )
 
 
 @router.get("/api/book/{slug}")
@@ -254,18 +265,18 @@ def book_api(slug: str):
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    return {
-        "slug": slug,
-        "title": row["title"] or slug,
-        "author": row["author"] or "",
-        # The live reason wins: the row can be stale if the file changed behind
-        # the app's back (REVIEW P3-5).
-        "unsupported": book.unsupported or row["unsupported"],
-        "chapter_count": book.chapter_count,
-        "spine": list(book.spine),
-        "toc": book.toc_json(),
-    }
+    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+        return {
+            "slug": slug,
+            "title": row["title"] or slug,
+            "author": row["author"] or "",
+            # The live reason wins: the row can be stale if the file changed
+            # behind the app's back (REVIEW P3-5).
+            "unsupported": book.unsupported or row["unsupported"],
+            "chapter_count": book.chapter_count,
+            "spine": list(book.spine),
+            "toc": book.toc_json(),
+        }
 
 
 @router.get("/api/footnotes/{slug}/{chapter_index}")
@@ -282,14 +293,14 @@ def footnote_api(slug: str, chapter_index: int):
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    if not 0 <= chapter_index < book.chapter_count:
-        raise HTTPException(status_code=404, detail="No such chapter")
-    return {
-        "slug": slug,
-        "chapter_index": chapter_index,
-        "edges": book.footnotes(chapter_index),
-    }
+    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+        if not 0 <= chapter_index < book.chapter_count:
+            raise HTTPException(status_code=404, detail="No such chapter")
+        return {
+            "slug": slug,
+            "chapter_index": chapter_index,
+            "edges": book.footnotes(chapter_index),
+        }
 
 
 @router.get("/api/text/{slug}/{chapter_index}")
@@ -311,18 +322,18 @@ def chapter_text_api(slug: str, chapter_index: int, text: bool = False):
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    if not 0 <= chapter_index < book.chapter_count:
-        raise HTTPException(status_code=404, detail="No such chapter")
+    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+        if not 0 <= chapter_index < book.chapter_count:
+            raise HTTPException(status_code=404, detail="No such chapter")
 
-    prose = book.chapter_text(chapter_index)
-    payload = {
-        "slug": slug,
-        "chapter_index": chapter_index,
-        "chapter_path": book.spine[chapter_index],
-        "char_count": len(prose),
-        "blocks": anchor_blocks(book.blocks(chapter_index)),
-    }
+        prose = book.chapter_text(chapter_index)
+        payload = {
+            "slug": slug,
+            "chapter_index": chapter_index,
+            "chapter_path": book.spine[chapter_index],
+            "char_count": len(prose),
+            "blocks": anchor_blocks(book.blocks(chapter_index)),
+        }
     if text:
         payload["text"] = prose
     return payload

@@ -237,3 +237,61 @@ def test_cache_drop_closes_and_frees_the_slug(nine_books):
         assert cache.get_or_open("b0", nine_books[0]) is not book
     finally:
         cache.clear()
+
+
+def test_a_book_in_use_is_not_evicted(nine_books):
+    """P2-5: eviction closed whatever was least recently used, and every
+    accessor on a closed book answers `""`/`[]`/`None` rather than failing — so
+    a request could have the book it was reading closed under it and render a
+    blank chapter instead of an error. `borrow()` is the claim that stops it.
+    """
+    cache = BookCache(maxsize=2)
+    try:
+        with cache.borrow("b0", nine_books[0]) as held:
+            assert held.chapter_text(0)
+            for i in (1, 2, 3, 4):            # far past the cap
+                cache.get_or_open(f"b{i}", nine_books[i])
+            # The same book, still open: the eviction went round it.
+            assert cache.get_or_open("b0", nine_books[0]) is held
+            assert held.chapter_text(0)
+    finally:
+        cache.clear()
+
+
+def test_the_cap_counts_idle_entries_only(nine_books):
+    cache = BookCache(maxsize=2)
+    try:
+        with cache.borrow("b0", nine_books[0]) as held:
+            for i in (1, 2, 3):
+                cache.get_or_open(f"b{i}", nine_books[i])
+            # The cap is enforced over the whole cache, so the idle entries are
+            # trimmed to make room for the borrowed one — which is itself never
+            # the one evicted. A cache whose entries are *all* in use would stay
+            # over the cap: it is a memory heuristic, not a promise.
+            assert len(cache) == 2
+            assert held.chapter_text(0)
+        # Released, it is an ordinary entry again — the least recently used of
+        # the two, so the next open evicts it.
+        assert len(cache) == 2
+        assert held.chapter_text(0)              # still open: the cap was met
+        cache.get_or_open("b4", nine_books[4])
+        assert len(cache) == 2
+        assert held.chapter_text(0) == ""        # evicted, and closed
+    finally:
+        cache.clear()
+
+
+def test_dropping_a_book_in_use_closes_it_when_the_reader_lets_go(nine_books):
+    """A delete or a re-upload of the slug someone is reading: the read in
+    progress is not cut off, and the handle does not leak either."""
+    cache = BookCache(maxsize=8)
+    try:
+        with cache.borrow("b0", nine_books[0]) as held:
+            cache.drop("b0")
+            assert held.chapter_text(0)          # the read in progress survives
+            assert len(cache) == 1               # and it is not forgotten yet
+        assert held.chapter_text(0) == ""        # closed on release
+        assert len(cache) == 0
+        assert cache.get_or_open("b0", nine_books[0]) is not held
+    finally:
+        cache.clear()

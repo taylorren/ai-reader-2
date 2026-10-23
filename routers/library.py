@@ -78,10 +78,11 @@ def backfill_chapter_counts(rows: list[dict]) -> None:
         return
     db = get_db()
     for row in missing:
-        book = book_cache.get_or_open(row["slug"], BOOKS_DIR / row["path"])
-        if book.chapter_count:
-            db.set_chapter_count(row["slug"], book.chapter_count)
-            row["chapter_count"] = book.chapter_count
+        with book_cache.borrow(row["slug"], BOOKS_DIR / row["path"]) as book:
+            chapter_count = book.chapter_count
+        if chapter_count:
+            db.set_chapter_count(row["slug"], chapter_count)
+            row["chapter_count"] = chapter_count
 
 
 def book_percent(progress: dict | None, chapter_count: int) -> int:

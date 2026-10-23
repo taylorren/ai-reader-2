@@ -58,7 +58,7 @@ recipes are in Appendix A.
 | P2-2 | Medium | Performance | The library page is N+1 ✔ applied | S |
 | P2-3 | Medium | Performance | No caching headers on `/book/**` ✔ applied | S |
 | P2-4 | Medium | Metadata | CJK word count double counts ✔ applied | S |
-| P2-5 | Medium | Concurrency | The book cache can close a book another request is using | M |
+| P2-5 | Medium | Concurrency | The book cache can close a book another request is using ✔ applied (borrow/refcount) | M |
 | P2-6 | Medium | Concurrency | `get_db()` is not thread-safe ✔ applied | S |
 | P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
 | P2-8 | Medium | Reading state | Progress writes can lose to older writes ✔ applied | M |
@@ -753,7 +753,7 @@ refreshes it — the same path that already restores annotations.
 
 ---
 
-### P2-5 · The book cache can close a book another request is using
+### P2-5 · The book cache can close a book another request is using ✔ applied — the cache counts borrowers
 
 **Severity:** Medium · **Effort:** M · **Area:** Concurrency
 **Review:** ☐ accept ☐ defer ☐ reject
@@ -776,6 +776,39 @@ set a `_closed` flag and raise a named error that routes map to a 503/retry, so 
 visible.
 
 **Verify:** a test that evicts a book mid-use and asserts the second caller gets a usable book.
+
+**Applied (2026-10-23) — the refcount, not the named error.**
+
+The finding offered two shapes: reference-count entries so eviction leaves an entry in use alone, or have
+`close()` raise a named error the routes map to a 503/retry. The first is the one that removes the
+failure instead of reporting it — a named error still leaves the reader looking at a blank chapter
+until something retries, and the retry would have to be written in every caller. So:
+
+* **`borrow(slug, path)`** is a context manager that marks the entry in use for the length of the
+  block, and `_evict_idle()` skips in-use entries. The cap is still enforced over the whole cache, so
+  idle entries make room for a borrowed one; a cache whose entries are *all* in use stays over the cap
+  until one is released. That is honest about what the cap is — a memory heuristic, not a promise.
+* **Claiming happens under the same lock as the lookup**, so a `drop()` cannot slip in between the
+  two and close the book just handed over. The parse itself stays outside the lock, as before: it is
+  the slow part, and a concurrent open that wins the race is closed rather than duplicated.
+* **`drop()` defers**: a delete or a re-upload of the slug someone is reading closes the book when the
+  reader lets go, not in the middle of a chapter. `get_or_open()` keeps its old meaning — "open it, no
+  claim" — for a caller that only peeks, which is what the existing cache tests use.
+* **Every route now borrows.** Most needed only one or two values, so they take those inside the
+  block (`chapter_count`, `spine[index]`, `footnotes(index)`, `chapter_text(index)`); the shell borrows
+  for the whole render, because its context reads the spine and the TOC. `highlights._require_chapter`
+  used to hand the *book* to its caller — which is exactly the "hold one across a request" shape the
+  finding is about — so it now returns the chapter's path instead.
+* **One accidental improvement:** `GET /book/{slug}/{path}`'s revalidation path (a 304) used to open
+  the book just to answer "not modified". The validator comes from the file, so that path now returns
+  before the borrow.
+
+**Tested** (`tests/test_helpers.py`, three cases): a book in use is not evicted however many others
+are opened (the review's own Verify line — the second caller gets a usable book, in fact the *same*
+one); the cap trims idle entries and a released entry is evictable again; and dropping a book in use
+closes it on release, with the read in progress surviving. Reverting the `continue` that skips in-use
+entries fails the first of them with `assert <Book 'b0.epub' chapters=2> is <Book 'b0.epub'
+unopenable>` — the reader's book closed under it, which is the reported symptom exactly.
 
 ---
 
@@ -2034,7 +2067,7 @@ out — use a longer timeout for the experiment.
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
 ~~P2-8 (progress ordering)~~ ✔ applied → ~~P3-15 (remove the dead surface)~~ ✔ applied →
 ~~P2-10 (context-aware painting, and the reading position's anchor)~~ ✔ applied →
-P2-5 (cache refcounts, if the 8-book limit is ever raised).
+~~P2-5 (the cache counts borrowers)~~ ✔ applied. Batch 4 complete.
 
 **Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; T1 landed
 (class guard, Node module tests, stub-DOM flows and the Playwright smoke), leaving P3-14 the one

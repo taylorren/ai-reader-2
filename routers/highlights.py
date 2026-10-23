@@ -73,15 +73,21 @@ def _require_book(slug: str) -> dict:
     return row
 
 
-def _require_chapter(slug: str, chapter_index: int):
-    """The open book, validating the chapter index against its spine."""
+def _require_chapter(slug: str, chapter_index: int) -> str:
+    """The chapter's path in the book, validating the index against its spine.
+
+    Returns the path rather than the book, because the caller needs one string
+    from it and the cache hands a book out only for the length of a `borrow()`
+    — holding one across a request is what let eviction close it mid-read
+    (REVIEW P2-5).
+    """
     from . import BOOKS_DIR, book_cache
 
     row = _require_book(slug)
-    book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-    if not 0 <= chapter_index < book.chapter_count:
-        raise HTTPException(status_code=400, detail="No such chapter")
-    return book
+    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+        if not 0 <= chapter_index < book.chapter_count:
+            raise HTTPException(status_code=400, detail="No such chapter")
+        return book.spine[chapter_index]
 
 
 def highlight_kind(highlight: dict) -> str:
@@ -106,13 +112,13 @@ def store_highlight(book_id: str, chapter_index: int, selected_text: str,
     `POST /api/highlight` stores exactly that. (The docstring here used to claim
     otherwise, which contradicted the route below it — REVIEW P3-7.)
     """
-    book = _require_chapter(book_id, chapter_index)
+    spine_path = _require_chapter(book_id, chapter_index)
     selected = (selected_text or "").strip()
     if not selected:
         raise HTTPException(status_code=400, detail="Empty selection")
     return get_db().save_highlight(
         book_id, chapter_index, selected,
-        chapter_path=chapter_path or book.spine[chapter_index],
+        chapter_path=chapter_path or spine_path,
         block_id=block_id,
         context_before=context_before, context_after=context_after,
     )
