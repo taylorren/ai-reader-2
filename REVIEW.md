@@ -756,7 +756,7 @@ refreshes it — the same path that already restores annotations.
 ### P2-5 · The book cache can close a book another request is using ✔ applied — the cache counts borrowers
 
 **Severity:** Medium · **Effort:** M · **Area:** Concurrency
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/__init__.py:39-57` (`get_or_open`), `booksource.py:218-222` (`close`).
 
@@ -812,10 +812,10 @@ unopenable>` — the reader's book closed under it, which is the reported sympto
 
 ---
 
-### P2-6 · `get_db()` is not thread-safe
+### P2-6 · `get_db()` is not thread-safe ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Concurrency
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/__init__.py:87-94`.
 
@@ -857,10 +857,10 @@ times"**.
 
 ---
 
-### P2-7 · `.env` overrides the real environment
+### P2-7 · `.env` overrides the real environment ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Configuration
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `server.py:16-30` (`load_env`).
 
@@ -999,7 +999,7 @@ string.
 ### P2-10 · Anchor data is stored that is never used ✔ applied — the painting, and the position's anchor
 
 **Severity:** Medium · **Effort:** M · **Area:** Data model
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/panel.js:292-309` (capture), `:663-716` (paint);
 `routers/highlights.py:93-113` (store); `routers/settings.py:56-60` and
@@ -1582,7 +1582,7 @@ body, not only in the hover.
 ### P3-12 · Deleting a card leaves an empty letter pill and stale stats ✔ applied — and the Vue pages have a harness now
 
 **Severity:** Low · **Effort:** S · **Area:** UX
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/library-app.js:100-117`; `static/js/highlights-app.js:38-58`.
 
@@ -1877,10 +1877,10 @@ install them.
 
 ---
 
-### T2 · No fixture with a URL-hostile title
+### T2 · No fixture with a URL-hostile title ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Testing
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `tests/fixtures.py` (`OPF` title is always "Fixture Book").
 
@@ -1896,10 +1896,10 @@ decision is yours, but the work is in the tree.
 
 ---
 
-### T3 · No tests on prompt content or save validation
+### T3 · No tests on prompt content or save validation ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Testing
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `tests/test_ai.py` (mocks the service, asserts routing and status only).
 
@@ -1921,10 +1921,10 @@ kind *and stores nothing*, and `test_a_conversation_turn_cannot_be_a_system_mess
 
 ---
 
-### T4 · No cost test for the library render
+### T4 · No cost test for the library render ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Testing
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `tests/test_library.py` (asserts content, not query shape).
 
@@ -1940,10 +1940,10 @@ pre-P2-2 code and 1 after, which is the assertion T4 asked for.
 
 ---
 
-### T5 · No test pins response headers
+### T5 · No test pins response headers ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Testing
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `tests/test_book_route.py` (status, media type and body only).
 
