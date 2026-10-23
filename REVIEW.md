@@ -64,7 +64,7 @@ recipes are in Appendix A.
 | P2-8 | Medium | Reading state | Progress writes can lose to older writes | M |
 | P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count | S |
 | P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
-| P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other | S |
+| P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
 | P2-12 | Medium | Storage | SQLite tuning and connection boilerplate | S |
 | P3-1 | Low | Front-end | Panel save label leaks across modes | S |
 | P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled | S |
@@ -83,7 +83,7 @@ recipes are in Appendix A.
 | P3-15 | Low | API | Dead API and schema surface | S |
 | T1 | High | Testing | No front-end tests ✔ applied (browser smoke still open) | L |
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
-| T3 | Medium | Testing | No tests on prompt content or save validation | S |
+| T3 | Medium | Testing | No tests on prompt content or save validation ✔ applied | S |
 | T4 | Low | Testing | No cost test for the library render ✔ applied | S |
 | T5 | Low | Testing | No test pins response headers ✔ applied | S |
 
@@ -883,10 +883,10 @@ is painted.
 
 ---
 
-### P2-11 · `analysis_type` is validated on one endpoint and not the other
+### P2-11 · `analysis_type` is validated on one endpoint and not the other ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** API
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/ai.py:35-41` and `:119-120` (validated) vs `:44-61` and `:134-156`
 (unvalidated); consumers: `panel.js:686` (`hl-<kind>`), `routers/highlights.py:151-156, 197-202`.
@@ -913,7 +913,17 @@ class ConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
 ```
 
-**Verify:** T3.
+**Applied (2026-10-23, `routers/ai.py` + `tests/test_ai.py`):** the two Literals the fix names —
+`AnalysisType = Literal["fact_check", "discussion", "comment"]` on `SaveAnalysisRequest`, and
+`role: Literal["user", "assistant"]` on `ConversationMessage` — with the module comment saying
+what the string was becoming (a CSS class, a `KIND_LABELS` miss, a stats key nothing displays).
+`AnalyzeRequest.analysis_type` is deliberately left a `str` with its route-level 400: the fix
+scopes itself to the save path, and turning that one into a 422 would change the error the panel
+already knows how to show.
+
+Three tests: an unknown kind on save is a **422 that stores nothing**; the three real kinds are
+still accepted (three highlights, three analyses); and a `system` turn is refused while the two
+real roles still work. Against the pre-fix code the first two fail with `assert 200 == 422`.
 
 ---
 
@@ -1427,9 +1437,12 @@ context appears in the prompt; add a 422 case for an unknown `analysis_type` on 
 **Half applied with P1-3 (2026-10-23):** the prompt-content half landed —
 `tests/test_ai.py` now stubs `_call` and captures what the model is actually asked, for
 `fact_check`, `discussion` and `discussion/start`, plus a no-context case that pins the bare
-prompt, and a unit test for `_excerpt`. The 422-on-save half is P2-11's, which is not accepted,
-so this item stays **half applied** and its index row stays unmarked until that lands. Left
-unticked for the same reason.
+prompt, and a unit test for `_excerpt`. The 422-on-save half is P2-11's.
+
+**Both halves applied (2026-10-23):** the 422 half landed with P2-11 —
+`test_save_rejects_an_unknown_analysis_type` asserts `/api/ai/save` answers 422 for an unknown
+kind *and stores nothing*, and `test_a_conversation_turn_cannot_be_a_system_message` asserts a
+`system` turn is refused. T3 is done; ticked.
 
 ---
 
@@ -1600,8 +1613,8 @@ out — use a longer timeout for the experiment.
 
 **Batch 2 — "the boundaries hold" (≈ one day):**
 ~~P2-1 (CSP on book files, with T5)~~ ✔ applied → ~~P2-6 (`get_db` lock)~~ ✔ applied →
-~~P2-7 (`setdefault`)~~ ✔ applied → P2-11 (`Literal` validation) → P2-12 (WAL + `_session`) →
-P2-4 (word count + test) → P2-9 (`/api/text`).
+~~P2-7 (`setdefault`)~~ ✔ applied → ~~P2-11 (`Literal` validation)~~ ✔ applied → P2-12 (WAL +
+`_session`) → P2-4 (word count + test) → P2-9 (`/api/text`).
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
 ~~P1-4 (textarea editing)~~ ✔ applied → P1-5 (frame keydown + menu semantics) → P3-1 → P3-2.

@@ -16,6 +16,8 @@ again in the browser (DOMPurify) — never on the book. A failing AI call is a
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -25,6 +27,13 @@ from . import _runtime_settings, get_ai_service, get_db
 from .highlights import store_highlight
 
 router = APIRouter()
+
+# The kinds an analysis can be. A Literal, not a `str`: `analysis_type` is
+# written straight into the database, becomes a CSS class (`hl-<kind>`), a
+# KIND_LABELS lookup and a stats key, so an arbitrary string is a broken
+# highlight wearing a valid one's clothes. `/api/ai/analyze` already refused
+# anything else; this makes the save path agree (REVIEW P2-11).
+AnalysisType = Literal["fact_check", "discussion", "comment"]
 
 # Past these lengths a discussion is nudged towards summarising, because the
 # model's context window — not the browser — is the limit.
@@ -56,7 +65,7 @@ class SaveAnalysisRequest(BaseModel):
     an explanation the reader never saves leaves nothing behind.
     """
     highlight_id: int | None = None
-    analysis_type: str              # 'fact_check' | 'discussion' | 'comment'
+    analysis_type: AnalysisType
     prompt: str = ""
     response: str
     book_id: str | None = None
@@ -68,7 +77,10 @@ class SaveAnalysisRequest(BaseModel):
 
 
 class ConversationMessage(BaseModel):
-    role: str                       # 'user' or 'assistant'
+    # Only the two roles a discussion has. `system` is the server's own prompt
+    # (see ai_service._messages); accepting it from a client would let a turn
+    # rewrite the model's instructions (REVIEW P2-11).
+    role: Literal["user", "assistant"]
     content: str
 
 
