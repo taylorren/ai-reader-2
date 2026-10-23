@@ -234,7 +234,13 @@ def export_highlights(slug: str):
         label = KIND_LABELS.get(item["kind"], item["kind"])
         lines.append(f"## {label} · 第 {item['chapter_index'] + 1} 章")
         lines.append("")
-        lines.append(f"> {item['selected_text']}")
+        # Every line of the quote, not just the first: a selection spanning two
+        # paragraphs used to export as one quoted line followed by an unquoted
+        # one, which reads as commentary rather than as the quoted text
+        # (REVIEW P3-3). A blank line keeps the quote open as a bare `>`, so the
+        # exported file carries no trailing whitespace.
+        lines.append("\n".join(f"> {line}" if line.strip() else ">"
+                               for line in item["selected_text"].splitlines()))
         lines.append("")
         if item["response"]:
             lines.append(item["response"])

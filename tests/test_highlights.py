@@ -128,3 +128,27 @@ def test_the_highlights_export_is_markdown(isolated_client, isolated, upload):
     assert "> The first paragraph mentions a plate" in body
     assert "A note about the plate." in body
     assert isolated_client.get("/highlights/ghost/export").status_code == 404
+
+
+def test_a_multi_paragraph_quote_exports_every_line_quoted(isolated_client,
+                                                           isolated, upload):
+    """P3-3: only the first line of a selection was prefixed, so a quote spanning
+    two paragraphs exported as one quoted line followed by an unquoted one —
+    which reads as commentary rather than as the quoted text."""
+    slug = upload()
+    selection = "第一段的结尾在这里。\n\n第二段的开头在这里。"
+    highlight_id = make_highlight(isolated_client, slug, selected_text=selection)
+    isolated_client.post("/api/ai/save", json={
+        "highlight_id": highlight_id, "analysis_type": "comment",
+        "prompt": "", "response": "A note."})
+
+    body = isolated_client.get(f"/highlights/{slug}/export").text
+    assert "> 第一段的结尾在这里。" in body
+    assert "> 第二段的开头在这里。" in body
+    # Both paragraphs are quoted; neither is left as a bare line.
+    assert "\n第一段的结尾在这里。" not in body
+    assert "\n第二段的开头在这里。" not in body
+    # A blank line between the two quoted paragraphs is valid Markdown (a
+    # paragraph break inside the quote), and the note still follows it.
+    assert "> 第一段的结尾在这里。\n>\n> 第二段的开头在这里。" in body
+    assert body.index("A note.") > body.index("> 第二段")

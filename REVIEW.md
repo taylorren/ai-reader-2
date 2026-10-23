@@ -68,7 +68,7 @@ recipes are in Appendix A.
 | P2-12 | Medium | Storage | SQLite tuning and connection boilerplate | S |
 | P3-1 | Low | Front-end | Panel save label leaks across modes ✔ applied | S |
 | P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled ✔ applied | S |
-| P3-3 | Low | Export | Markdown export breaks multi-paragraph quotes | S |
+| P3-3 | Low | Export | Markdown export breaks multi-paragraph quotes ✔ applied | S |
 | P3-4 | Low | A11y | `<html lang="en">` on a Chinese UI ✔ applied | S |
 | P3-5 | Low | Robustness | Stale `unsupported`, derived from the database row ✔ applied | S |
 | P3-6 | Low | Routing | `read_redirect` can compute `chapter_index = -1` ✔ applied | S |
@@ -76,7 +76,7 @@ recipes are in Appendix A.
 | P3-8 | Low | Dependencies | `httpx2` is a runtime dependency for a test-only need | S |
 | P3-9 | Low | AI | AI client is created per call; one `except` is unreachable | S |
 | P3-10 | Low | Operations | No upload size cap and no staging-directory sweep | S |
-| P3-11 | Low | UX | The unsupported reason is only a tooltip | S |
+| P3-11 | Low | UX | The unsupported reason is only a tooltip ✔ applied | S |
 | P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats | S |
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
 | P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
@@ -1115,10 +1115,10 @@ the exemption's removal — and deleting the rule again now fails the suite with
 
 ---
 
-### P3-3 · Markdown export breaks multi-paragraph quotes
+### P3-3 · Markdown export breaks multi-paragraph quotes ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Export
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/highlights.py:226-253`, specifically `:237`.
 
@@ -1131,6 +1131,13 @@ ends and the note begins.
 
 **Fix:** `quoted = "\n".join("> " + line for line in text.splitlines())`, or normalise
 whitespace in the export as `_view_items` already does for display.
+
+**Applied (2026-10-23, `routers/highlights.py` + `tests/test_highlights.py`):** the fix's first
+option, with one refinement: a blank line inside the selection becomes a bare `>` rather than
+`> ` (a marker with a trailing space), so the exported file carries no trailing whitespace and the
+quote stays open across the paragraph break. Tested with a two-paragraph selection: both paragraphs
+come out quoted, neither as a bare line, the blank line between them is `>`, and the note still
+follows the quote.
 
 ---
 
@@ -1310,10 +1317,10 @@ so this is hygiene rather than a DoS boundary.
 
 ---
 
-### P3-11 · The unsupported reason is only a tooltip
+### P3-11 · The unsupported reason is only a tooltip ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** UX
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `templates/library.html:69-71`; `routers/library.py:116-130`.
 
@@ -1326,6 +1333,12 @@ reason is only visible in the reader's unsupported panel — which the card cann
 
 **Fix:** render a clamped `.unsupported-reason` line under the warning (CSS line-clamp +
 `title` for the full text).
+
+**Applied (2026-10-23, `templates/library.html` + `static/css/library.css` + `tests/test_library.py`):**
+exactly the fix's shape — a `.unsupported-reason` line under the warning, clamped to two lines
+(`-webkit-line-clamp`) so a long reason cannot push the card's actions around, with the full text
+still in the `title`. The existing unsupported-book test now also asserts the reason is in the page
+body, not only in the hover.
 
 ---
 

@@ -137,6 +137,12 @@ def test_an_unsupported_book_is_stored_with_its_reason(isolated_client, isolated
     page = isolated_client.get("/")
     assert "无法打开此书" in page.text
 
+    # P3-11: the reason belongs on the card, not only in a `title` hover — a
+    # touch device has no hover, and the card cannot reach the reader's own
+    # reason page (it hides its 浏览本书 link for an unsupported book).
+    assert "unsupported-reason" in page.text
+    assert "DRM" in page.text or "drm" in page.text
+
 
 def test_a_file_that_is_not_an_epub_is_refused_with_a_named_reason(
         isolated_client, isolated, db):

@@ -68,6 +68,10 @@
                         <div class="book-card-lower">
                             {% if book.unsupported %}
                             <div class="unsupported" title="{{ book.unsupported }}">⚠ 无法打开此书</div>
+                            <!-- Why, on the card: a hover is no use on a touch
+                                 device, and the reader's own page for the book
+                                 is not reachable from here (REVIEW P3-11). -->
+                            <div class="unsupported-reason" title="{{ book.unsupported }}">{{ book.unsupported }}</div>
                             {% endif %}
                             {% if book.stats_display %}
                             <span class="book-stats">{{ book.stats_display }}</span>
