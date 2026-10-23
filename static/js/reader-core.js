@@ -68,6 +68,116 @@ window.ReaderCore = (function () {
         return null;
     }
 
+    // The text nodes under an element, in document order: the run a range
+    // offset is measured against.
+    function textNodes(doc, root) {
+        const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        let node;
+        while ((node = walker.nextNode())) nodes.push(node);
+        return nodes;
+    }
+
+    // Where a range point sits in the concatenated text of those nodes — or null
+    // when it is not one of them, which is what a range starting at an element
+    // boundary looks like.
+    function textOffset(nodes, node, offset) {
+        let position = 0;
+        for (const candidate of nodes) {
+            if (candidate === node) return position + offset;
+            position += candidate.nodeValue.length;
+        }
+        return null;
+    }
+
+    // How many characters at the end of `text` `wanted` also ends with.
+    function commonSuffix(text, wanted) {
+        let matched = 0;
+        while (matched < text.length && matched < wanted.length &&
+               text[text.length - 1 - matched] === wanted[wanted.length - 1 - matched]) {
+            matched += 1;
+        }
+        return matched;
+    }
+
+    // How many characters at the start of `text` `wanted` also starts with.
+    function commonPrefix(text, wanted) {
+        let matched = 0;
+        while (matched < text.length && matched < wanted.length &&
+               text[matched] === wanted[matched]) {
+            matched += 1;
+        }
+        return matched;
+    }
+
+    // Where a highlight's text sits in `full`, as `{at, length}` in `full`'s own
+    // coordinates — or null when the text is not in it at all.
+    //
+    // A block is an anchor, but not a precise one: a paragraph can repeat a
+    // sentence, and wrapping the first occurrence paints the wrong one — the
+    // exact ambiguity the context saved with the selection exists to resolve
+    // (REVIEW P2-10). So every occurrence is scored by how well the text around
+    // it matches that context, and the best one wins.
+    //
+    // With no context, or a context that matches nothing (a row imported from
+    // the old app, a book re-uploaded since), every candidate scores zero and
+    // the first wins: the behaviour before this existed, kept as the fallback.
+    // A tie also keeps the first, so the answer is deterministic.
+    //
+    // Compared whitespace-insensitively like every other match here: the
+    // extractor's spacing and the served document's need not agree.
+    function findTextRange(full, text, before, after) {
+        const haystack = normalizedIndex(full);
+        const needle = normalizedIndex(text).value;
+        if (!needle) return null;
+        const wantedBefore = normalizedIndex(before || "").value;
+        const wantedAfter = normalizedIndex(after || "").value;
+
+        let best = -1;
+        let bestScore = -1;
+        let at = haystack.value.indexOf(needle);
+        while (at >= 0) {
+            // Both sides normalised before comparing: the run either side of an
+            // occurrence is separated from it by a space, while the stored
+            // context was trimmed when it was captured — compared raw, a
+            // *correct* context would score zero on its last character.
+            const score =
+                commonSuffix(normalizeText(haystack.value.slice(0, at)), wantedBefore) +
+                commonPrefix(normalizeText(haystack.value.slice(at + needle.length)),
+                             wantedAfter);
+            if (score > bestScore) {
+                bestScore = score;
+                best = at;
+            }
+            at = haystack.value.indexOf(needle, at + 1);
+        }
+        if (best < 0) return null;
+        const start = haystack.map[best];
+        const end = haystack.map[best + needle.length - 1] + 1;
+        return { at: start, length: end - start };
+    }
+
+    // The block's text either side of a range, normalised — the context a
+    // selection travels with.
+    //
+    // Read from the document rather than from the extractor's copy of the block,
+    // because only the document knows *which* occurrence the reader selected:
+    // `block.text.indexOf(selection)` answers "the first one", so a paragraph
+    // repeating a sentence stored the other occurrence's surroundings — and the
+    // mark then painted that other one (REVIEW P2-10). Null when the range's ends
+    // are not text nodes of the block; the caller falls back from there.
+    function contextAround(doc, root, range, span) {
+        const nodes = textNodes(doc, root);
+        const start = textOffset(nodes, range.startContainer, range.startOffset);
+        const end = textOffset(nodes, range.endContainer, range.endOffset);
+        if (start == null || end == null) return null;
+        const full = nodes.map((node) => node.nodeValue).join("");
+        return {
+            before: normalizeText(full.slice(Math.max(0, start - span), start)),
+            after: normalizeText(full.slice(end, end + span)),
+        };
+    }
+
     // The smallest block that contains the selection is the anchor.
     function findBlockForText(blocks, text) {
         let best = null;
@@ -126,6 +236,10 @@ window.ReaderCore = (function () {
         normalizeText,
         normalizedIndex,
         offsetToPoint,
+        textNodes,
+        textOffset,
+        findTextRange,
+        contextAround,
         findBlockForText,
         blockElement,
         fileURL,

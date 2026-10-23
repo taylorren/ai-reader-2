@@ -63,7 +63,7 @@ recipes are in Appendix A.
 | P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
 | P2-8 | Medium | Reading state | Progress writes can lose to older writes ✔ applied | M |
 | P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count ✔ applied | S |
-| P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
+| P2-10 | Medium | Data model | Anchor data is stored that is never used ✔ applied (painting; the progress columns stay a decision) | M |
 | P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
 | P2-12 | Medium | Storage | SQLite tuning and connection boilerplate ✔ applied (tuning; the `_session` refactor left out) | S |
 | P3-1 | Low | Front-end | Panel save label leaks across modes ✔ applied | S |
@@ -346,9 +346,9 @@ parameter at all, which makes 深入讨论 slightly worse than the finding says:
 most-used action and the one that sent the least.
 
 **Note on stored data:** the panel now captures up to 300 characters per side instead of 60, so
-new highlights store a richer `context_before`/`context_after` — which is also what P2-10's
-context-aware painting will want. Existing rows keep their 60-character values; nothing is
-migrated and no schema changes.
+new highlights store a richer `context_before`/`context_after` — which is what P2-10's
+context-aware painting reads (applied 2026-10-23). Existing rows keep their 60-character values;
+nothing is migrated and no schema changes.
 
 ---
 
@@ -963,7 +963,7 @@ string.
 
 ---
 
-### P2-10 · Anchor data is stored that is never used
+### P2-10 · Anchor data is stored that is never used ✔ applied — the painting half, end to end
 
 **Severity:** Medium · **Effort:** M · **Area:** Data model
 **Review:** ☐ accept ☐ defer ☐ reject
@@ -995,6 +995,54 @@ not have.
 
 **Verify:** a chapter with two identical sentences; highlight the second, reload — the second
 is painted.
+
+**Applied (2026-10-23) — both halves, because either one alone is inert.**
+
+The painting half is what the Verify line asks for; the capture half is what makes it work.
+`block.text.indexOf(selection)` — the capture — answers "the first occurrence" whatever the reader
+selected, so a mark made on the second of two identical sentences stored the *first* one's
+surroundings. Fixing only the painting would have scored the wrong candidate higher and changed
+nothing at all.
+
+* **The capture** (`panel.js` → `contextAround` in `reader-core.js`) reads the context from the
+  document around the real `Range`: the block element's text nodes, sliced either side of the
+  selection and normalised. That is the only place the reader's *choice* is recorded. The
+  extractor's copy of the block stays as the fallback for a range whose ends are not text nodes of
+  the block (a selection starting at an element boundary), where the first occurrence is still the
+  best available answer.
+* **The painting** (`findTextRange`) scores every occurrence by how well the text around it matches
+  the saved context — longest common suffix before, longest common prefix after — and wraps the
+  best. No context, or a context that matches nothing (a row imported from the old app, a book
+  re-uploaded since), leaves every candidate on zero, so the first wins: the previous behaviour,
+  kept as the fallback. A tie also keeps the first, so the answer is deterministic.
+* **A third defect in the same family, found while doing it:** `showHighlight()` handed an empty
+  context to `state.selection`, so a note added later to an *existing* mark re-saved it without the
+  surroundings that say which occurrence it is. It now carries the stored context.
+
+Two details worth recording, both found by tests rather than by reading the code:
+
+* The comparison normalises **both** sides first. The run either side of an occurrence is separated
+  from it by a space, while the stored context was trimmed when it was captured — compared raw, a
+  *correct* context scored zero on its last character, so the fix would have been inert for every
+  row.
+* The scoring is a best-match heuristic, not a proof: a context matching two candidates equally
+  leaves the first. That is deliberate — it is the behaviour that existed, and the alternative is
+  guessing.
+
+**Tested.** Node, five cases in `tests/js/reader-core.test.js`: the occurrence the context points at
+(two and three occurrences), the fallbacks (no context, a context that matches nothing, a tie),
+whitespace-insensitive matching against the document's own spacing, and the empty cases. Browser,
+the Verify line end to end (`tests/test_browser.py`, `write_repeated_epub`): a paragraph that
+repeats a sentence, the second selected in a real `Range`, Ctrl+K → 添加笔记 → save — then the
+stored row read back (its `context_before` is the text *between* the two sentences) and the page
+reloaded (the mark's previous sibling is that same text, which only holds for the second
+occurrence). Each half was reverted on its own to confirm the test fails for it: pre-fix capture ⇒
+`context_before` is `''`; pre-fix painting ⇒ "the mark landed on the wrong occurrence: `''`".
+
+**The finding's other half is a decision and stays open.** Progress's `block_id`/`anchor` are never
+written (0 rows live) and were documented rather than dropped in P3-15. Writing them means
+block-anchored resume — SPEC principle 5, a feature rather than a fix — so the columns stay until
+that milestone, or until the schema is asked to stop implying a precision it does not have.
 
 ---
 
@@ -1573,8 +1621,10 @@ why it was worth doing as its own pass rather than mechanically.
   mark, and both AI and highlights test suites use it as their fixture builder for the "highlight
   with no analyses" state the views have to render (the panel never calls it — it saves mark and
   content in one act through `/api/ai/save`). `ProgressUpdate.anchor` is written to the column and
-  never read back, but it is the raw material for P2-10, which is *undecided*: removing it now
-  would pre-empt that decision, so it is documented instead. Both say who may delete them.
+  never read back. P2-10's painting half (applied 2026-10-23) turned out not to need it — that reads
+  the *highlight* context — so what remains is P2-10's progress half, still a decision:
+  block-anchored resume (SPEC principle 5) or drop the columns. The docstring stands until then, and
+  says who may delete them.
 
 **Three more instances found while doing it**, none of them in the review:
 
@@ -1938,8 +1988,9 @@ out — use a longer timeout for the experiment.
 
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
 ~~P2-8 (progress ordering)~~ ✔ applied → ~~P3-15 (remove the dead surface)~~ ✔ applied →
-P2-10 (context-aware painting / block anchors) → P2-5 (cache refcounts, if the 8-book limit is
-ever raised).
+~~P2-10 (context-aware painting — the painting half, end to end)~~ ✔ applied →
+P2-10's progress columns (block-anchored resume, or drop them) → P2-5 (cache refcounts, if the
+8-book limit is ever raised).
 
 **Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; T1 landed
 (class guard, Node module tests, stub-DOM flows and the Playwright smoke), leaving P3-14 the one

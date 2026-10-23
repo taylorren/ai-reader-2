@@ -506,3 +506,49 @@ def write_scripted_epub(path) -> Path:
         zf.writestr("OEBPS/content.opf", SCRIPTED_OPF)
         zf.writestr("OEBPS/ch1.xhtml", SCRIPTED_CHAPTER)
     return Path(path)
+
+
+# A book whose first paragraph repeats a sentence: the shape that made
+# `block.text.indexOf(selection)` answer "the first one" whatever the reader had
+# selected, so a mark made on the second sentence was painted on the first
+# (REVIEW P2-10). The middle text is what tells the two occurrences apart, so a
+# test can say which one a mark landed on. The paragraph is written on one line
+# — one text node — because that is what the wrap splits.
+REPEATED_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter One</title></head>
+<body>
+  <h1 id="top">Chapter One</h1>
+  <p>The same sentence twice. In between stands a marker. The same sentence twice.</p>
+  <p>A second paragraph follows, so the chapter plainly carries prose and the
+     paragraph the reader selected is not the only block in it.</p>
+</body>
+</html>
+"""
+
+REPEATED_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Repeated Sentence</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:repeated-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+
+def write_repeated_epub(path) -> Path:
+    """A book whose chapter repeats a sentence inside one paragraph."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", REPEATED_OPF)
+        zf.writestr("OEBPS/ch1.xhtml", REPEATED_CHAPTER)
+    return Path(path)

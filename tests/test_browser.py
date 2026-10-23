@@ -1,15 +1,17 @@
 """T1's browser smoke: the reader shell driven by a real browser.
 
 Everything else in the suite drives the reader's JavaScript against a stub DOM
-(tests/js/) or asserts server-rendered HTML. Three of the review's findings
-live in the browser's own rules and can only be seen here:
+(tests/js/) or asserts server-rendered HTML. Four of the review's findings live
+in the browser's own rules and can only be seen here:
 
-    P3-3  a shown toast's *computed* opacity — the class was set, the rule was
-          missing, so the message reached the DOM and stayed invisible
-    P1-4  a saved mark, actually painted into the frame's document, on the
-          first load and again after a reload
-    P2-1  the book's own <script>, which must never execute — neither inside
-          the reader nor when the book's document is opened directly
+    P3-3   a shown toast's *computed* opacity — the class was set, the rule was
+           missing, so the message reached the DOM and stayed invisible
+    P1-4   a saved mark, actually painted into the frame's document, on the
+           first load and again after a reload
+    P2-1   the book's own <script>, which must never execute — neither inside
+           the reader nor when the book's document is opened directly
+    P2-10  a mark on the second of two identical sentences, which needs a real
+           Range: the capture reads the context from the document around it
 
 The whole module skips unless playwright and its browser are both present:
 
@@ -36,7 +38,7 @@ sync_api = pytest.importorskip(
 
 import httpx  # noqa: E402
 
-from fixtures import write_scripted_epub  # noqa: E402
+from fixtures import write_repeated_epub, write_scripted_epub  # noqa: E402
 
 
 # -- the app, over real HTTP ------------------------------------------------
@@ -103,6 +105,14 @@ def chapter_payload(base_url, slug, index=0):
         response = client.get(f"/api/text/{quote(slug)}/{index}")
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def stored_highlights(base_url, slug, index=0):
+    """A chapter's stored marks, as the panel's own API returns them."""
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.get(f"/api/highlights/{quote(slug)}/{index}")
+    assert response.status_code == 200, response.text
+    return response.json()["highlights"]
 
 
 def seed_highlight(base_url, slug, selected_text, block_id=None, index=0):
@@ -239,3 +249,80 @@ def test_a_books_own_script_never_runs(browser, base_url, isolated):
         assert control.locator("html").get_attribute("data-book-handler-ran") == "1"
     finally:
         context.close()
+
+
+def test_a_repeated_sentence_marks_the_one_that_was_selected(browser, base_url, isolated):
+    """P2-10, end to end: a paragraph that repeats a sentence.
+
+    `block.text.indexOf(selection)` answers "the first occurrence" whatever the
+    reader selected, so the context captured with a mark described the *other*
+    sentence — and painting then wrapped that other one. Both halves have to be
+    right for the mark to land where the reader put it, and only one of them is
+    reachable without a browser:
+
+    * the **capture** reads the context from the document around the real Range
+      (the stub tests hand the selection in, so they cannot see it at all);
+    * the **paint** picks the occurrence whose surroundings match that context.
+
+    Driven through the reader's own UI — select the second sentence, Ctrl+K,
+    添加笔记, save — then the stored row is read back and the page reloaded,
+    which is the review's own Verify line.
+    """
+    slug = upload_book(base_url, write_repeated_epub(isolated / "repeated.epub"))
+    sentence = "The same sentence twice."
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        paragraph = page.frame_locator("#chapter-frame").locator("p").first
+        paragraph.wait_for()
+
+        # A click into the book, because that is what focuses the frame's own
+        # document — and that is where the panel listens for Ctrl+K. Without it
+        # the key lands in the shell and nothing happens: the keyboard trigger
+        # belongs to a reader who is already *in* the book.
+        paragraph.click()
+
+        # The second occurrence, inside the paragraph's single text node.
+        paragraph.evaluate("""(node, sentence) => {
+            const text = node.firstChild;
+            const at = text.nodeValue.lastIndexOf(sentence);
+            const range = document.createRange();
+            range.setStart(text, at);
+            range.setEnd(text, at + sentence.length);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }""", sentence)
+
+        # Then 添加笔记: a note is saved without the AI, which is what makes this
+        # reachable without a provider.
+        paragraph.press("Control+k")
+        page.locator('#context-menu [data-action="comment"]').click()
+        page.fill("#comment-input", "第二条句子上的笔记。")
+        page.click("#panel-save")
+        page.wait_for_function(
+            "document.querySelector('#toast').textContent === '已保存到数据库'")
+
+        # The capture: the context belongs to the *second* sentence, so the
+        # before-side is the text between the two and the after-side is empty.
+        stored = stored_highlights(base_url, slug)[0]
+        assert stored["selected_text"] == sentence
+        assert stored["context_before"].endswith("In between stands a marker.")
+        assert stored["context_after"] == ""
+
+        # The paint: after a reload the mark is on the second one. Its previous
+        # sibling is the text the wrap split off, which only exists for the
+        # second occurrence — the first would leave the mark at the paragraph's
+        # start, with nothing before it.
+        page.reload()
+        mark = page.frame_locator("#chapter-frame").locator(
+            "mark.reader-highlight").first
+        mark.wait_for()
+        assert mark.inner_text() == sentence
+        before = mark.evaluate(
+            "node => (node.previousSibling && node.previousSibling.nodeValue) || ''")
+        assert before.strip().endswith("In between stands a marker."), (
+            f"the mark landed on the wrong occurrence: {before!r}")
+    finally:
+        page.close()

@@ -11,8 +11,8 @@ frame's elements by text; the selected text is what a reader sees wrapped. */
 window.ReaderPanel = (function () {
     // The pure helpers, shared with reader.js and unit-tested in Node
     // (static/js/reader-core.js, REVIEW T1).
-    const { escapeHtml, normalizedIndex, offsetToPoint, findBlockForText,
-            blockElement } = window.ReaderCore;
+    const { escapeHtml, findTextRange, contextAround, textNodes, offsetToPoint,
+            findBlockForText, blockElement } = window.ReaderCore;
 
     const KIND_LABELS = {
         fact_check: "解释说明",
@@ -322,6 +322,23 @@ window.ReaderPanel = (function () {
             return { text: found.text, block_id: null,
                      context_before: "", context_after: "" };
         }
+        // The context is read from the document, not from the extractor's copy
+        // of the block: only the document knows *which* occurrence the reader
+        // selected. `block.text.indexOf(found.text)` answers "the first one", so
+        // a paragraph that repeats a sentence used to store the other
+        // occurrence's surroundings — and the mark then painted that one, while
+        // the context sent to the AI described text the reader had not selected
+        // (REVIEW P2-10).
+        const root = blockElement(found.doc, block);
+        const around = root
+            ? contextAround(found.doc, root, found.range, CONTEXT_SPAN) : null;
+        if (around) {
+            return { text: found.text, block_id: block.id,
+                     context_before: around.before, context_after: around.after };
+        }
+        // No element to measure against (the block's text is not one run in the
+        // served document): the extractor's copy is all there is, and it can
+        // only offer the first occurrence.
         const at = block.text.indexOf(found.text);
         return {
             text: found.text,
@@ -718,23 +735,15 @@ window.ReaderPanel = (function () {
     }
 
     function wrapText(doc, root, text, highlight) {
-        const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-        const nodes = [];
-        let node;
-        while ((node = walker.nextNode())) nodes.push(node);
+        const nodes = textNodes(doc, root);
         const full = nodes.map((item) => item.nodeValue).join("");
-        let at = full.indexOf(text);
-        let length = text.length;
-        if (at < 0) {
-            const haystack = normalizedIndex(full);
-            const needle = normalizedIndex(text).value;
-            const found = needle ? haystack.value.indexOf(needle) : -1;
-            if (found < 0) return false;
-            at = haystack.map[found];
-            length = haystack.map[found + needle.length - 1] + 1 - at;
-        }
-        const start = offsetToPoint(nodes, at);
-        const end = offsetToPoint(nodes, at + length);
+        // Which occurrence, when the block repeats the text: the context saved
+        // with the selection decides (REVIEW P2-10).
+        const found = findTextRange(full, text,
+                                    highlight.context_before, highlight.context_after);
+        if (!found) return false;
+        const start = offsetToPoint(nodes, found.at);
+        const end = offsetToPoint(nodes, found.at + found.length);
         if (!start || !end) return false;
         const range = doc.createRange();
         range.setStart(start.node, start.offset);
@@ -851,7 +860,11 @@ window.ReaderPanel = (function () {
         state.mode = "saved";
         state.selection = { text: highlight.selected_text,
                             block_id: highlight.block_id,
-                            context_before: "", context_after: "" };
+                            // The stored context travels with it: a note added
+                            // later to this mark must not lose the surroundings
+                            // that say which occurrence it is (REVIEW P2-10).
+                            context_before: highlight.context_before || "",
+                            context_after: highlight.context_after || "" };
         el("panel-selected").textContent = highlight.selected_text;
         openPanel(KIND_LABELS[highlight.kind] || "高亮");
         const body = el("panel-body");

@@ -20,8 +20,9 @@ const core = new Function("window", `${source}\nreturn window.ReaderCore;`)({});
 
 test("the module exposes the helpers the shell relies on", () => {
     for (const name of ["escapeHtml", "normalizeText", "normalizedIndex",
-                        "offsetToPoint", "findBlockForText", "blockElement",
-                        "fileURL", "clampSize", "tocKey"]) {
+                        "offsetToPoint", "textNodes", "textOffset",
+                        "findTextRange", "contextAround", "findBlockForText",
+                        "blockElement", "fileURL", "clampSize", "tocKey"]) {
         assert.equal(typeof core[name], "function", name);
     }
 });
@@ -84,6 +85,19 @@ test("offsetToPoint finds the text node an offset lands in", () => {
     assert.equal(core.offsetToPoint([], 0), null);
 });
 
+test("textOffset measures a range point in the run's own coordinates", () => {
+    const nodes = [{ nodeValue: "abc" }, { nodeValue: "def" }, { nodeValue: "gh" }];
+    assert.equal(core.textOffset(nodes, nodes[0], 0), 0);
+    assert.equal(core.textOffset(nodes, nodes[0], 3), 3);
+    assert.equal(core.textOffset(nodes, nodes[1], 1), 4);
+    assert.equal(core.textOffset(nodes, nodes[2], 2), 8);
+    // A range whose container is not one of the run's text nodes — it starts at
+    // an element boundary — has no offset here: the caller falls back instead of
+    // guessing which occurrence the reader meant.
+    assert.equal(core.textOffset(nodes, { nodeValue: "other" }, 0), null);
+    assert.equal(core.textOffset([], nodes[0], 0), null);
+});
+
 test("a normalised match round trips back into the right node", () => {
     // The shape wrapText relies on: the selection is found in the *normalised*
     // run, then mapped back through `map` to a real node and offset.
@@ -109,6 +123,78 @@ test("a normalised match round trips back into the right node", () => {
     assert.equal(core.normalizeText(
         full.slice(haystack.map[at], haystack.map[at + needle.value.length - 1] + 1)),
         "paragraph mentions");
+});
+
+// The paragraph the repeated-sentence case is built from: the same sentence
+// twice, with a middle that says which is which.
+const SENTENCE = "The same sentence twice.";
+const REPEATED = "The same sentence twice. In between stands a marker. "
+               + "The same sentence twice.";
+
+test("findTextRange wraps the occurrence the saved context points at", () => {
+    // REVIEW P2-10: matching the *first* occurrence painted the wrong sentence
+    // whenever a paragraph repeated one, which is the ambiguity the context
+    // saved with the selection exists to resolve.
+    const second = core.findTextRange(REPEATED, SENTENCE,
+                                      "The same sentence twice. In between stands a marker.",
+                                      "");
+    assert.equal(second.at, REPEATED.lastIndexOf(SENTENCE));
+    assert.equal(REPEATED.slice(second.at, second.at + second.length), SENTENCE);
+
+    // ...and the first, when the context describes the first.
+    const first = core.findTextRange(REPEATED, SENTENCE, "",
+                                     "In between stands a marker. The same sentence twice.");
+    assert.equal(first.at, REPEATED.indexOf(SENTENCE));
+
+    // Three occurrences: the middle one, chosen by both halves at once.
+    const three = SENTENCE + " alpha " + SENTENCE + " beta " + SENTENCE;
+    const middle = core.findTextRange(three, SENTENCE, "alpha", "beta");
+    assert.equal(middle.at, three.indexOf(SENTENCE, three.indexOf(SENTENCE) + 1));
+});
+
+test("findTextRange falls back to the first occurrence without usable context", () => {
+    // No context at all: a row imported from the old app, or an import that
+    // never captured one.
+    assert.equal(core.findTextRange(REPEATED, SENTENCE, "", "").at, 0);
+    assert.equal(core.findTextRange(REPEATED, SENTENCE, undefined, undefined).at, 0);
+    // A context that matches nothing — the book was re-uploaded, the text
+    // edited — leaves every candidate on zero, so the first wins: the behaviour
+    // before this existed, kept as the fallback.
+    assert.equal(core.findTextRange(REPEATED, SENTENCE,
+                                    "somewhere else entirely", "and afterwards").at, 0);
+    // Identical surroundings are a tie, and a tie keeps the first, so the
+    // answer is deterministic rather than dependent on iteration order.
+    assert.equal(core.findTextRange(SENTENCE + SENTENCE, SENTENCE, "", "").at, 0);
+    assert.equal(core.findTextRange(SENTENCE + " x " + SENTENCE, SENTENCE, "", "").at, 0);
+});
+
+test("findTextRange matches the document's whitespace, not the extractor's", () => {
+    // The block's text arrives from the extractor single-spaced; the served
+    // document carries the book's own spacing. The range returned covers the
+    // document's characters — whitespace and all — which is what a Range needs.
+    const document = "The first paragraph mentions a plate\n     and then keeps going";
+    const found = core.findTextRange(document, "mentions a plate and then", "", "");
+    assert.equal(document.slice(found.at, found.at + found.length),
+                 "mentions a plate\n     and then");
+
+    // The context is compared normalised too, so the space that separates an
+    // occurrence from its surroundings does not cost the match its last
+    // character (which would make a correct context score zero).
+    const twice = "One. Two. One. Two.";
+    // What the capture would store for the *second* "Two.": the text actually
+    // before it, trimmed.
+    assert.equal(core.findTextRange(twice, "Two.", "One. Two. One.", "").at,
+                 twice.lastIndexOf("Two."));
+    assert.equal(core.findTextRange(twice, "Two.", "One.", "One.").at,
+                 twice.indexOf("Two."));
+});
+
+test("findTextRange reports nothing when the text is not there", () => {
+    assert.equal(core.findTextRange(REPEATED, "not in this paragraph", "", ""), null);
+    assert.equal(core.findTextRange(REPEATED, "", "", ""), null);
+    assert.equal(core.findTextRange("", SENTENCE, "", ""), null);
+    // Whitespace-only normalises away to nothing, so it matches nothing.
+    assert.equal(core.findTextRange(REPEATED, "   ", "", ""), null);
 });
 
 test("findBlockForText picks the smallest block that contains the selection", () => {
