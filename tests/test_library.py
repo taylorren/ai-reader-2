@@ -316,7 +316,7 @@ def test_a_slug_stored_before_the_fix_is_still_linked_safely(
     redirect's `Location` (an unquoted `#` there sends the browser to
     `/read/C`)."""
     import routers.library
-    from routers import sanitize_folder_name
+    from routers.titles import sanitize_folder_name
 
     # Upload through the pre-fix rule, so the row and the folder on disk carry
     # the hostile slug exactly as an existing library's do.

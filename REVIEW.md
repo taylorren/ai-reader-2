@@ -79,7 +79,7 @@ recipes are in Appendix A.
 | P3-11 | Low | UX | The unsupported reason is only a tooltip ✔ applied | S |
 | P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats ✔ applied (and the Vue pages now have a harness) | S |
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
-| P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
+| P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag ✔ applied | M |
 | P3-15 | Low | API | Dead API and schema surface ✔ applied (removals + docstrings; three more found) | S |
 | T1 | High | Testing | No front-end tests ✔ applied (all three steps) | L |
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
@@ -1677,10 +1677,10 @@ pre-fix code the test reports `raw HTML survived into innerHTML: <img src=x oner
 
 ---
 
-### P3-14 · `routers/__init__.py` is a grab-bag
+### P3-14 · `routers/__init__.py` is a grab-bag ✔ applied — four modules, and one thing that had to move with them
 
 **Severity:** Low · **Effort:** M · **Area:** Architecture
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/__init__.py:1-250`.
 
@@ -1696,6 +1696,31 @@ place where a new reader cannot tell what depends on what.
 **Fix:** split into `app_state.py` (cache, db, ai, settings), `text.py` (counts, reading time),
 `titles.py` (slug, sorting, grouping) and `assets.py` (versioning); have routers import them
 directly. Pure refactor — the tests already cover each helper.
+
+**Applied (2026-10-23).** `routers/__init__.py` is now a docstring and nothing else — the package's
+map. The code moved *verbatim* into `app_state.py` (paths, the book cache, the database, the AI
+service), `text.py` (word counts and reading times), `titles.py` (slugs, folder names, the
+pinyin-aware ordering) and `assets.py` (the cache-busting versions), and every router imports what it
+needs from those at module level. The 13 function-local `from . import …` lines are gone.
+
+**The part worth recording: those function-local imports were load-bearing.** They were not only a
+circularity dodge. The suite isolates a test by patching `app_state.BOOKS_DIR`, and a router that
+bound `from .app_state import BOOKS_DIR` at module level would have captured the *real* directory
+before the patch — nine tests failed exactly that way on the first run, uploading into the
+repository's own `books/`. So `BOOKS_DIR` is read through the module at each use
+(`app_state.BOOKS_DIR`), with the reason written above the import. The other shared names did not need
+it: `book_cache` and `runtime_settings` are objects that get *mutated*, and `get_db()` already reads
+`DB_PATH` at call time. A refactor of shared state is exactly where this distinction hides.
+
+**Two smaller things came with it.** `_runtime_settings` is now `runtime_settings` — it is shared
+state, and a module-private name imported by two routers was the old layout's fault rather than a
+design. And `SPEC.md`'s file layout lists the new modules, so the two documents still describe the
+same tree.
+
+**Tested** by the suite as a whole: it covers every helper and every route, and the refactor moved no
+behaviour, so **157 passed / 4 skipped before and after** is the evidence — the one exception being
+the nine failures described above, which is what a change to shared state should look like when it
+goes wrong: loudly, with the repository's `books/` taking the writes.
 
 ---
 
@@ -2102,5 +2127,6 @@ out — use a longer timeout for the experiment.
 ~~P2-5 (the cache counts borrowers)~~ ✔ applied. Batch 4 complete.
 
 **Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; T1 landed
-(class guard, Node module tests, stub-DOM flows and the Playwright smoke), leaving P3-14 the one
-structural investment left, best done when the next feature touches `panel.js`.
+(class guard, Node module tests, stub-DOM flows and the Playwright smoke) and P3-14 landed with it
+(the router split), so **every item in this file is applied**. What is left is not a finding: the
+SPEC's P5 milestone — Docker and systemd packaging, and deleting the old world.

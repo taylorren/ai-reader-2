@@ -17,7 +17,14 @@ from pydantic import BaseModel
 
 from ai_service import PROVIDERS
 
-from . import _runtime_settings, get_db
+# `BOOKS_DIR` is read through the module at every use rather than imported by
+# value: the suite points the app at a private library by patching
+# `app_state.BOOKS_DIR`, and a value bound at import time would not see it.
+# The old function-local `from . import BOOKS_DIR` did exactly that by
+# accident — it re-read the attribute per call — and it is also why the
+# dependency direction was invisible (REVIEW P3-14).
+from . import app_state
+from .app_state import book_cache, get_db, runtime_settings
 
 router = APIRouter()
 
@@ -31,7 +38,7 @@ class SettingsUpdate(BaseModel):
 def get_settings():
     """The current provider override and the .env default behind it."""
     return {
-        "provider_override": _runtime_settings["provider_override"],
+        "provider_override": runtime_settings["provider_override"],
         "default_provider": os.getenv("OLLAMA_DEFAULT_PROVIDER", "ollama_cloud"),
         "status": "success",
     }
@@ -41,15 +48,15 @@ def get_settings():
 def update_settings(settings: SettingsUpdate):
     """Set the provider override, or clear it with a null value."""
     if settings.provider_override is None:
-        _runtime_settings["provider_override"] = None
+        runtime_settings["provider_override"] = None
     else:
         provider = settings.provider_override.lower()
         if provider not in PROVIDERS:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid provider. Must be 'ollama' or 'ollama_cloud'")
-        _runtime_settings["provider_override"] = provider
-    return {"provider_override": _runtime_settings["provider_override"],
+        runtime_settings["provider_override"] = provider
+    return {"provider_override": runtime_settings["provider_override"],
             "status": "success"}
 
 
@@ -77,7 +84,6 @@ class ProgressUpdate(BaseModel):
 @router.post("/api/books/{slug}/completion")
 def set_completion(slug: str, completed: bool):
     """Mark a book as completed or not completed."""
-    from . import get_db
 
     db = get_db()
     if db.get_book(slug) is None:
@@ -89,13 +95,12 @@ def set_completion(slug: str, completed: bool):
 @router.post("/api/progress")
 def save_progress(update: ProgressUpdate):
     """Save the reading position: chapter plus percent within the chapter."""
-    from . import BOOKS_DIR, book_cache, get_db
 
     db = get_db()
     row = db.get_book(update.book_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    with book_cache.borrow(update.book_id, BOOKS_DIR / row["path"]) as book:
+    with book_cache.borrow(update.book_id, app_state.BOOKS_DIR / row["path"]) as book:
         if not 0 <= update.chapter_index < book.chapter_count:
             raise HTTPException(status_code=400, detail="No such chapter")
         chapter_path = book.spine[update.chapter_index]

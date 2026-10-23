@@ -23,7 +23,15 @@ from markdown_it import MarkdownIt
 from markupsafe import Markup
 from pydantic import BaseModel
 
-from . import BASE_DIR, get_asset_version, get_db
+# `BOOKS_DIR` is read through the module at every use rather than imported by
+# value: the suite points the app at a private library by patching
+# `app_state.BOOKS_DIR`, and a value bound at import time would not see it.
+# The old function-local `from . import BOOKS_DIR` did exactly that by
+# accident — it re-read the attribute per call — and it is also why the
+# dependency direction was invisible (REVIEW P3-14).
+from . import app_state
+from .app_state import BASE_DIR, book_cache, get_db
+from .assets import get_asset_version
 
 router = APIRouter()
 
@@ -81,10 +89,9 @@ def _require_chapter(slug: str, chapter_index: int) -> str:
     — holding one across a request is what let eviction close it mid-read
     (REVIEW P2-5).
     """
-    from . import BOOKS_DIR, book_cache
 
     row = _require_book(slug)
-    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+    with book_cache.borrow(slug, app_state.BOOKS_DIR / row["path"]) as book:
         if not 0 <= chapter_index < book.chapter_count:
             raise HTTPException(status_code=400, detail="No such chapter")
         return book.spine[chapter_index]

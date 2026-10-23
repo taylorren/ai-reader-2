@@ -50,7 +50,7 @@ def test_a_text_less_paragraph_does_not_break_the_text_api(isolated_client,
     shape, one of them in 40 of its 42 chapters).
     """
     from booksource import Book
-    from routers import BOOKS_DIR, book_cache, get_db
+    from routers.app_state import BOOKS_DIR, book_cache, get_db
 
     slug = upload()
     response = isolated_client.get(f"/api/text/{slug}/0")

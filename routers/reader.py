@@ -23,7 +23,15 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from . import BASE_DIR, get_asset_version
+# `BOOKS_DIR` is read through the module at every use rather than imported by
+# value: the suite points the app at a private library by patching
+# `app_state.BOOKS_DIR`, and a value bound at import time would not see it.
+# The old function-local `from . import BOOKS_DIR` did exactly that by
+# accident — it re-read the attribute per call — and it is also why the
+# dependency direction was invisible (REVIEW P3-14).
+from . import app_state
+from .app_state import BASE_DIR, book_cache, get_db
+from .assets import get_asset_version
 
 router = APIRouter()
 
@@ -90,12 +98,11 @@ def book_file(request: Request, slug: str, path: str):
     file, so its stamp changes, and the upload path drops the open book — and
     `If-None-Match` answers 304 with no body.
     """
-    from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    book_path = BOOKS_DIR / row["path"]
+    book_path = app_state.BOOKS_DIR / row["path"]
     etag = _book_etag(book_path, path)
     headers = {
         "Content-Security-Policy": "script-src 'none'; object-src 'none'",
@@ -145,7 +152,6 @@ def _etag_matches(header: str, etag: str) -> bool:
 @router.get("/read/{slug}")
 def read_redirect(slug: str):
     """The library links here; resume the last-read chapter (P4 stores it)."""
-    from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
     if row is None:
@@ -153,7 +159,7 @@ def read_redirect(slug: str):
     index = 0
     progress = get_db().get_progress(slug)
     if progress:
-        with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+        with book_cache.borrow(slug, app_state.BOOKS_DIR / row["path"]) as book:
             chapter_count = book.chapter_count
         # Clamped at both ends: a book with an empty spine (`chapter_count == 0`,
         # a malformed file that still opened) used to compute -1 and redirect to
@@ -215,14 +221,13 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
     nothing else: nothing from a book executes (principle 6). A book whose
     `unsupported` names a deferred case gets that reason instead of a frame.
     """
-    from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
     # Borrowed for the whole render: the shell's context reads the book's spine
     # and TOC, and eviction must not close it half-way through (REVIEW P2-5).
-    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+    with book_cache.borrow(slug, app_state.BOOKS_DIR / row["path"]) as book:
         # The live value wins over the stored one: a file deleted or replaced
         # behind the app's back still has a row saying it was readable, and
         # `unsupported` is cheap to recompute here — the book is open either way
@@ -260,12 +265,11 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
 @router.get("/api/book/{slug}")
 def book_api(slug: str):
     """Spine, TOC and metadata as JSON."""
-    from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+    with book_cache.borrow(slug, app_state.BOOKS_DIR / row["path"]) as book:
         return {
             "slug": slug,
             "title": row["title"] or slug,
@@ -288,12 +292,11 @@ def footnote_api(slug: str, chapter_index: int):
     A book whose markers the library cannot classify (Word-style `_ftn`
     links, say) yields no edges — its own links still work natively.
     """
-    from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+    with book_cache.borrow(slug, app_state.BOOKS_DIR / row["path"]) as book:
         if not 0 <= chapter_index < book.chapter_count:
             raise HTTPException(status_code=404, detail="No such chapter")
         return {
@@ -317,12 +320,11 @@ def chapter_text_api(slug: str, chapter_index: int, text: bool = False):
     `word_count`, a misnomer that invited the wrong use. A word count is
     `estimate_book_word_count`'s job, with the rules it documents.
     """
-    from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
-    with book_cache.borrow(slug, BOOKS_DIR / row["path"]) as book:
+    with book_cache.borrow(slug, app_state.BOOKS_DIR / row["path"]) as book:
         if not 0 <= chapter_index < book.chapter_count:
             raise HTTPException(status_code=404, detail="No such chapter")
 

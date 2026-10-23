@@ -210,7 +210,11 @@ ai-reader-2/
 ├── database.py           # SQLite: books, highlights, ai_analyses, progress
 ├── ai_service.py         # Ollama client (local/cloud), unchanged in spirit
 ├── routers/
-│   ├── __init__.py       # shared deps, book cache, slug/word-count helpers
+│   ├── __init__.py       # the package: the docstring that maps the four below
+│   ├── app_state.py      # paths, the book cache, the database, the AI service
+│   ├── text.py           # word counts and reading times
+│   ├── titles.py         # slugs, folder names, pinyin-aware ordering
+│   ├── assets.py         # cache-busting versions for the css/js a page loads
 │   ├── library.py        # library view, upload, delete
 │   ├── reader.py         # reader shell, /book/{slug}/{path}, chapter APIs
 │   ├── highlights.py     # highlight CRUD, highlights view, export

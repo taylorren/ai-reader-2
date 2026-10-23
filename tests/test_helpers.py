@@ -12,12 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixtures import write_counting_epub, write_epub  # noqa: E402
 
 from booksource import Book  # noqa: E402
-from routers import (  # noqa: E402
-    BookCache,
+from routers.app_state import BookCache  # noqa: E402
+from routers.text import (  # noqa: E402
     estimate_book_word_count,
     estimate_reading_time,
     format_reading_time,
     format_word_count,
+)
+from routers.titles import (  # noqa: E402
     next_free_folder,
     sanitize_folder_name,
 )
@@ -40,7 +42,7 @@ def test_the_database_is_built_once_under_concurrent_first_requests(
     import time
 
     import database
-    import routers
+    from routers import app_state
 
     builds = []
     real_init = database.Database.__init__
@@ -50,11 +52,11 @@ def test_the_database_is_built_once_under_concurrent_first_requests(
         time.sleep(0.05)          # widen the window the lock has to close
         real_init(self, path)
 
-    monkeypatch.setattr(routers, "_db", None)
+    monkeypatch.setattr(app_state, "_db", None)
     monkeypatch.setattr(database.Database, "__init__", slow_init)
 
     seen = []
-    threads = [threading.Thread(target=lambda: seen.append(routers.get_db()))
+    threads = [threading.Thread(target=lambda: seen.append(app_state.get_db()))
                for _ in range(8)]
     for thread in threads:
         thread.start()

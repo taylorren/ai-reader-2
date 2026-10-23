@@ -13,9 +13,9 @@ def make_highlight(client, slug):
 
 
 def service():
-    import routers
+    from routers import app_state
 
-    return routers.get_ai_service()
+    return app_state.get_ai_service()
 
 
 def test_analyze_rejects_an_unknown_provider(isolated_client):
@@ -57,14 +57,14 @@ def test_analyze_returns_the_response(isolated_client, monkeypatch):
 
 
 def test_the_provider_override_wins(isolated_client, monkeypatch):
-    import routers
+    from routers import app_state
 
     async def fake_fact_check(text, context_before="", context_after="",
                               provider="ollama"):
         return provider
 
     monkeypatch.setattr(service(), "fact_check", fake_fact_check)
-    routers._runtime_settings["provider_override"] = "ollama_cloud"
+    app_state.runtime_settings["provider_override"] = "ollama_cloud"
     response = isolated_client.post("/api/ai/analyze", json={
         "analysis_type": "fact_check", "selected_text": "x",
         "provider": "ollama"})

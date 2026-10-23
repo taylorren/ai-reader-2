@@ -25,10 +25,20 @@ from fastapi.templating import Jinja2Templates
 
 from booksource import Book
 
-from . import (BASE_DIR, build_grouped_books, estimate_book_word_count,
-               estimate_reading_time, format_reading_time, format_word_count,
-               get_asset_version, next_free_folder, sanitize_folder_name,
-               title_group_key, transliterate_for_sort)
+# `BOOKS_DIR` is read through the module at every use rather than imported by
+# value: the suite points the app at a private library by patching
+# `app_state.BOOKS_DIR`, and a value bound at import time would not see it.
+# The old function-local `from . import BOOKS_DIR` did exactly that by
+# accident — it re-read the attribute per call — and it is also why the
+# dependency direction was invisible (REVIEW P3-14).
+from . import app_state
+from .app_state import BASE_DIR, book_cache, get_db
+from .assets import get_asset_version
+from .text import (estimate_book_word_count, estimate_reading_time,
+                   format_reading_time, format_word_count)
+from .titles import (build_grouped_books, next_free_folder,
+                     sanitize_folder_name, title_group_key,
+                     transliterate_for_sort)
 
 router = APIRouter()
 
@@ -45,7 +55,6 @@ def library_view(request: Request):
     `chapter_count` existed is opened once so its card can show whole-book
     progress, then the column is written and every later render is SQLite.
     """
-    from . import get_db
 
     rows = get_db().books_with_progress()
     backfill_chapter_counts(rows)
@@ -70,7 +79,6 @@ def backfill_chapter_counts(rows: list[dict]) -> None:
     render — and for every newly uploaded book. An unsupported book is
     skipped: it has no spine to read and no progress to place.
     """
-    from . import BOOKS_DIR, book_cache, get_db
 
     missing = [row for row in rows
                if not row.get("chapter_count") and not row.get("unsupported")]
@@ -78,7 +86,7 @@ def backfill_chapter_counts(rows: list[dict]) -> None:
         return
     db = get_db()
     for row in missing:
-        with book_cache.borrow(row["slug"], BOOKS_DIR / row["path"]) as book:
+        with book_cache.borrow(row["slug"], app_state.BOOKS_DIR / row["path"]) as book:
             chapter_count = book.chapter_count
         if chapter_count:
             db.set_chapter_count(row["slug"], chapter_count)
@@ -177,7 +185,6 @@ def upload_book(file: UploadFile = File(...)):
     Sync on purpose: FastAPI runs this handler in a threadpool, which is
     where the CPU-bound parse and word count belong.
     """
-    from . import BOOKS_DIR, book_cache, get_db
 
     safe_filename = os.path.basename((file.filename or "").replace("\\", "/"))
     if not safe_filename.lower().endswith(".epub"):
@@ -204,11 +211,11 @@ def upload_book(file: UploadFile = File(...)):
             target_slug, replaced = slug, True          # same book: in place
         else:
             target_slug = next_free_folder(
-                BOOKS_DIR, slug,
+                app_state.BOOKS_DIR, slug,
                 taken={row["slug"] for row in db.list_books()}).name
             replaced = False
 
-        folder = BOOKS_DIR / target_slug
+        folder = app_state.BOOKS_DIR / target_slug
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / f"{target_slug}.epub"
         os.replace(temp_path, target)
@@ -218,7 +225,7 @@ def upload_book(file: UploadFile = File(...)):
         db.upsert_book({
             "slug": target_slug,
             # The path is relative to the books directory: books/<slug>/<slug>.epub
-            "path": target.relative_to(BOOKS_DIR).as_posix(),
+            "path": target.relative_to(app_state.BOOKS_DIR).as_posix(),
             "title": title,
             "author": book.author,
             "language": book.language,
@@ -262,10 +269,9 @@ def delete_book(slug: str):
     """Remove the book folder and its row; the annotations stay."""
     if ".." in slug or "/" in slug or "\\" in slug:
         raise HTTPException(status_code=400, detail="Invalid book ID")
-    from . import BOOKS_DIR, book_cache, get_db
 
     db = get_db()
-    folder = BOOKS_DIR / slug
+    folder = app_state.BOOKS_DIR / slug
     if db.get_book(slug) is None and not folder.exists():
         raise HTTPException(status_code=404, detail="Book not found")
     if folder.exists():

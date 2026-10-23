@@ -35,15 +35,15 @@ def client():
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
     """A private library for one test: its own books dir and database."""
-    import routers
+    from routers import app_state
 
     books = tmp_path / "books"
     books.mkdir()
-    monkeypatch.setattr(routers, "BOOKS_DIR", books)
-    monkeypatch.setattr(routers, "DB_PATH", tmp_path / "reader_data.db")
-    monkeypatch.setattr(routers, "_db", None)
+    monkeypatch.setattr(app_state, "BOOKS_DIR", books)
+    monkeypatch.setattr(app_state, "DB_PATH", tmp_path / "reader_data.db")
+    monkeypatch.setattr(app_state, "_db", None)
     yield tmp_path
-    routers.book_cache.clear()
+    app_state.book_cache.clear()
 
 
 @pytest.fixture
@@ -87,8 +87,8 @@ def upload(isolated_client, isolated):
 @pytest.fixture(autouse=True)
 def _reset_provider_override():
     """The provider override is in-memory state: never leak between tests."""
-    import routers
+    from routers import app_state
 
-    routers._runtime_settings["provider_override"] = None
+    app_state.runtime_settings["provider_override"] = None
     yield
-    routers._runtime_settings["provider_override"] = None
+    app_state.runtime_settings["provider_override"] = None

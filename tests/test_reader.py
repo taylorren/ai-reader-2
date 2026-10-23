@@ -233,11 +233,11 @@ def test_a_book_whose_file_vanished_shows_its_reason_not_a_404(
     links, every chapter 404'd, and the named reason principle 7 promises was
     nowhere. The live value wins now.
     """
-    import routers
+    from routers import app_state
 
     slug = upload(isolated_client, isolated)
     (isolated / "books" / slug / f"{slug}.epub").unlink()
-    routers.book_cache.clear()
+    app_state.book_cache.clear()
 
     # The row is unchanged, so the card still links here…
     assert isolated_client.get(f"/read/{slug}",
@@ -260,14 +260,14 @@ def test_resume_never_redirects_to_a_chapter_that_cannot_exist(
     chapters, so the library link redirected to `/read/{slug}/-1`, which 404s —
     the one place where a named failure became a bare 404.
     """
-    import routers
+    from routers import app_state
 
     slug = upload(isolated_client, isolated)
     # The reader was at chapter two when the file went away.
     isolated_client.post("/api/progress", json={
         "book_id": slug, "chapter_index": 1, "scroll_percent": 40.0})
     (isolated / "books" / slug / f"{slug}.epub").unlink()
-    routers.book_cache.clear()
+    app_state.book_cache.clear()
 
     response = isolated_client.get(f"/read/{slug}", follow_redirects=False)
     assert response.status_code == 307
@@ -511,7 +511,7 @@ def test_the_shell_asset_version_covers_every_asset_it_loads(
     a script to the shell without adding it to the router's list now fails this
     test, which is exactly the drift it exists to catch.
     """
-    from routers import get_asset_version
+    from routers.assets import get_asset_version
 
     slug = upload(isolated_client, isolated)
     body = isolated_client.get(f"/read/{slug}/0").text

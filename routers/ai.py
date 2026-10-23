@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from ai_service import PROVIDERS, AIServiceError
 
-from . import _runtime_settings, get_ai_service, get_db
+from .app_state import get_ai_service, get_db, runtime_settings
 from .highlights import store_highlight
 
 router = APIRouter()
@@ -113,7 +113,7 @@ def _provider(requested: str | None) -> str:
 
     An unknown provider is a 400 here, before any call is attempted.
     """
-    provider = (_runtime_settings["provider_override"] or requested
+    provider = (runtime_settings["provider_override"] or requested
                 or "ollama_cloud").lower()
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail="Invalid AI provider")

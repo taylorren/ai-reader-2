@@ -102,7 +102,7 @@ def test_the_reviews_index_and_its_items_agree():
     """
     import re
 
-    from routers import BASE_DIR
+    from routers.app_state import BASE_DIR
 
     text = (BASE_DIR / "REVIEW.md").read_text()
 
@@ -140,7 +140,7 @@ def test_the_reviews_index_and_its_items_agree():
 
 
 def test_books_dir_points_at_the_repo_books_directory():
-    from routers import BASE_DIR, BOOKS_DIR
+    from routers.app_state import BASE_DIR, BOOKS_DIR
 
     assert BOOKS_DIR == BASE_DIR / "books"
     assert (BASE_DIR / "SPEC.md").exists(), "BASE_DIR is not the repo root"
