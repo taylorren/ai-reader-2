@@ -121,7 +121,10 @@ function createPage(options = {}) {
         clearTimeout: () => {},
         navigator: { clipboard: { writeText() {} } },
         marked: { parse: (markdown) => markdown },
-        DOMPurify: { sanitize: (html) => html },
+        // A passthrough sanitiser: the real one is a vendor bundle, and these
+        // tests are about what the panel does with its output. `domPurify:
+        // false` models the file failing to load (REVIEW P3-13).
+        DOMPurify: options.domPurify === false ? undefined : { sanitize: (html) => html },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         history: { replaceState() {}, pushState() {} },
         requestAnimationFrame: () => 0,

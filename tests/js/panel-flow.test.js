@@ -212,6 +212,33 @@ test("a note is stored as a comment, with the selection it marks", async () => {
 });
 
 
+test("with DOMPurify missing, markdown is escaped rather than injected", async () => {
+    // A sanitiser must fail closed: purify.min.js 404s, or arrives truncated,
+    // and `marked` passes raw HTML through by default — so the old fallback put
+    // whatever the model wrote straight into innerHTML (REVIEW P3-13).
+    const page = createPage({ domPurify: false });
+    const hostile = '<img src=x onerror="alert(1)">';
+    page.route(/\/api\/ai\/discussion\/start$/, {
+        response: "an overview", provider_used: "ollama", status: "success",
+        conversation_history: [{ role: "user", content: hostile },
+                               { role: "assistant", content: "an overview" }],
+    });
+    page.route(/\/api\/text\//, { blocks: [] });
+    page.route(/\/api\/highlights\//, { highlights: [] });
+    page.P.init();
+    page.P.setBook("Fixture Book");
+    page.P.state.selection = { ...SELECTION };
+    page.menuItems.find((i) => i.dataset.action === "discussion").click();
+    await page.settle(); await page.settle();
+
+    const bubble = page.created.find((el) => /discussion-message/.test(el.className));
+    assert.ok(bubble, "the discussion rendered a bubble");
+    assert.ok(!bubble.innerHTML.includes("<img"),
+              `raw HTML survived into innerHTML: ${bubble.innerHTML}`);
+    assert.ok(bubble.innerHTML.includes("&lt;img"), bubble.innerHTML);
+});
+
+
 test("one panel's label and state do not leak into the next", async () => {
     // A summary leaves the save button reading 保存总结 and a summary in memory;
     // the panel that follows must not offer to save either (REVIEW P3-1).

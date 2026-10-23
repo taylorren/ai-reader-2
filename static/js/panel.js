@@ -67,9 +67,15 @@ window.ReaderPanel = (function () {
         return (typeof BOOK !== "undefined" && BOOK) || window.BOOK || {};
     }
 
+    // Markdown → HTML for the panel. A sanitiser must fail *closed*: if
+    // DOMPurify did not load (a 404, a truncated vendor file, an upgrade), the
+    // old code returned `marked`'s output unsanitised into innerHTML — and
+    // `marked` passes raw HTML through by default. AI output and the reader's
+    // own notes both arrive here, so the fallback is the escaped text
+    // (REVIEW P3-13).
     function renderMarkdown(markdown) {
         const html = window.marked ? marked.parse(markdown || "") : escapeHtml(markdown);
-        return window.DOMPurify ? DOMPurify.sanitize(html) : html;
+        return window.DOMPurify ? DOMPurify.sanitize(html) : escapeHtml(markdown);
     }
 
     function toast(message, kind) {

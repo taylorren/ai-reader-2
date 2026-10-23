@@ -288,6 +288,18 @@ def test_a_supported_book_still_opens_normally(isolated_client, isolated):
     assert isolated_client.get(f"/api/book/{slug}").json()["unsupported"] is None
 
 
+def test_the_pages_declare_the_language_they_are_written_in(isolated_client,
+                                                           isolated):
+    """P3-4: all three pages said lang="en" while the interface, the buttons and
+    the book text are Chinese — so a screen reader picked the wrong voice, and
+    translation and hyphenation were misled."""
+    slug = upload(isolated_client, isolated)
+    for path in ("/", f"/read/{slug}/0", f"/highlights/{slug}"):
+        page = isolated_client.get(path).text
+        assert '<html lang="zh-Hans">' in page, path
+        assert '<html lang="en">' not in page, path
+
+
 def test_the_shell_serves_the_books_own_document(isolated_client, isolated):
     slug = upload(isolated_client, isolated)
     response = isolated_client.get(f"/read/{slug}/0")

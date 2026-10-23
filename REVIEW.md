@@ -69,7 +69,7 @@ recipes are in Appendix A.
 | P3-1 | Low | Front-end | Panel save label leaks across modes ✔ applied | S |
 | P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled ✔ applied | S |
 | P3-3 | Low | Export | Markdown export breaks multi-paragraph quotes | S |
-| P3-4 | Low | A11y | `<html lang="en">` on a Chinese UI | S |
+| P3-4 | Low | A11y | `<html lang="en">` on a Chinese UI ✔ applied | S |
 | P3-5 | Low | Robustness | Stale `unsupported`, derived from the database row ✔ applied | S |
 | P3-6 | Low | Routing | `read_redirect` can compute `chapter_index = -1` ✔ applied | S |
 | P3-7 | Low | Docs | Docstrings and SPEC that contradict the code | S |
@@ -78,7 +78,7 @@ recipes are in Appendix A.
 | P3-10 | Low | Operations | No upload size cap and no staging-directory sweep | S |
 | P3-11 | Low | UX | The unsupported reason is only a tooltip | S |
 | P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats | S |
-| P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent | S |
+| P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
 | P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
 | P3-15 | Low | API | Dead API and schema surface | S |
 | T1 | High | Testing | No front-end tests ✔ applied (browser smoke still open) | L |
@@ -1134,10 +1134,10 @@ whitespace in the export as `_view_items` already does for display.
 
 ---
 
-### P3-4 · `<html lang="en">` on a Chinese UI
+### P3-4 · `<html lang="en">` on a Chinese UI ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Accessibility
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `templates/library.html:2`, `templates/reader.html:2`, `templates/highlights.html:2`.
 
@@ -1149,6 +1149,11 @@ and hyphenation are misled. One attribute, three files.
 
 **Fix:** `lang="zh-Hans"` (the English strings are short enough not to need per-element
 `lang`), or `<html lang="zh-Hans">` with `lang="en"` on the few English labels.
+
+**Applied (2026-10-23, `templates/` + `tests/test_reader.py`):** the first option — all three pages
+declare `zh-Hans`, and the short English labels (Add New Book, Completed) are left to the page's
+language, as the fix allows. One test walks the library, reader and highlights pages and asserts
+each declares `zh-Hans` and none says `en`.
 
 ---
 
@@ -1345,10 +1350,10 @@ decrement/`recompute` the stats counts from the remaining items.
 
 ---
 
-### P3-13 · Markdown rendering fails open if DOMPurify is absent
+### P3-13 · Markdown rendering fails open if DOMPurify is absent ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Security
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/panel.js:61-64`.
 
@@ -1376,6 +1381,17 @@ return window.DOMPurify ? DOMPurify.sanitize(html) : escapeHtml(markdown);
 
 and consider a startup check for the vendor files (`static/vendor/README.md` already documents
 versions).
+
+**Applied (2026-10-23, `static/js/panel.js` + `tests/js/`):** the fix's line, verbatim — the
+fallback is the escaped text, not `marked`'s output. The vendor-file startup check is *not* done:
+a missing `marked` already degrades safely (escapeHtml), and a missing `purify` now does too, so a
+check would only turn a silent downgrade into a visible one. Worth adding if the panel ever ships
+rendered HTML that *needs* the sanitiser.
+
+Tested by loading the panel with `dompurify: false` — the stub's way of modelling a 404 or a
+truncated vendor file — and driving a discussion whose history carries
+`<img src=x onerror="alert(1)">`: the rendered bubble contains `&lt;img` and no `<img`. Against the
+pre-fix code the test reports `raw HTML survived into innerHTML: <img src=x onerror="alert(1)">`.
 
 ---
 
