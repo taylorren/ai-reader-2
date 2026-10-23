@@ -1674,13 +1674,34 @@ that a failed one sets `toast visible error` and leaves the save on offer. The s
 what T1's step 3 called a browser for; it is honest about the boundary: the text *selection* is
 handed in (a real Range needs a real document), and nothing is rendered.
 
-**What is still open, and it needs a decision.** The Playwright smoke itself. There is no usable
-browser in this environment — `/usr/bin/chromium-browser` is the snap shim and the snap is not
-installed, so the only way to run one here is to add it: `playwright` in the venv plus a ~130 MB
-browser download, or a `package.json` with npm's Playwright beside uv. The test would then skip
-wherever no browser is installed, as the corpus tests do. Its marginal value over what landed is
-*rendering*: that the toast is actually on screen, that the mark is actually painted in the frame,
-that layout has not swallowed either. Worth doing deliberately, as its own change — say the word.
+**What is still open: the Playwright smoke — and an attempt was made (2026-10-23).** I wrote the
+test and the fixture for it, and tried to install the dependency here. The install is what stopped
+it, and the reason is concrete: **this machine fetches PyPI at ~28 KB/s** (`curl` measured, not
+guessed). The `playwright` wheel alone is 46 MB — about 28 minutes — and the Chromium build it
+needs is another ~130 MB from a second CDN. `uv add --dev playwright` timed out twice; the wheel
+was fetched once but the install stalled with the process 16 minutes old and one second of CPU
+used. The dependency, the test and the fixture were therefore reverted rather than committed:
+`uv sync --dry-run` reports "Would make no changes", so nothing about the environment moved, and
+the suite stays the trustworthy signal it has been (no test in it has ever failed to run).
+
+The environment is otherwise ready for it: the shared libraries Chromium needs are all present
+(`libnss3`, `libatk`, `libgbm`, `libasound`, `libxkbcommon`), and no root is required — only
+bandwidth. Two commands, on a link that can carry 46 MB plus 130 MB:
+
+```bash
+uv add --dev playwright
+uv run playwright install chromium
+```
+
+What it would assert, and why it is worth more than another stub: that the toast is *visible*
+(computed `opacity: 1` — the P1-1 bug, which no stylesheet in the repo can hide any more), that a
+saved mark is *painted* in the book's own document before and after a reload, and that a script a
+book ships does *not* run — the execution half of P2-1's Verify line, which a header assertion can
+only argue by mechanism. The test as drafted drives the real server over an isolated library
+(`uvicorn` on an ephemeral port with `BOOKS_DIR`/`DB_PATH` monkeypatched), stubs the AI at the
+network edge with `page.route`, makes a real selection with a `Range` inside the frame, and fires
+the `mouseup` the panel listens for. Re-adding it is minutes of work; it is not in the tree because
+it has never been executed, and a test that has never run is not evidence.
 
 ---
 
