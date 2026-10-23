@@ -65,7 +65,7 @@ recipes are in Appendix A.
 | P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count ✔ applied | S |
 | P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
 | P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
-| P2-12 | Medium | Storage | SQLite tuning and connection boilerplate | S |
+| P2-12 | Medium | Storage | SQLite tuning and connection boilerplate ✔ applied (tuning; the `_session` refactor left out) | S |
 | P3-1 | Low | Front-end | Panel save label leaks across modes ✔ applied | S |
 | P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled ✔ applied | S |
 | P3-3 | Low | Export | Markdown export breaks multi-paragraph quotes ✔ applied | S |
