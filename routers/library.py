@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime
 from urllib.parse import quote
@@ -138,6 +139,35 @@ def library_card(row: dict) -> dict:
 
 
 # -- upload ---------------------------------------------------------------
+
+# A staging file is normally removed by the upload's own `finally`. A killed
+# process cannot run it, so orphans accumulate silently — the sweep below clears
+# them at startup (REVIEW P3-10).
+UPLOAD_ORPHAN_AGE_SECONDS = 3600
+
+
+def sweep_uploads(max_age_seconds: int = UPLOAD_ORPHAN_AGE_SECONDS) -> int:
+    """Remove staging files an interrupted upload left behind, and say how many.
+
+    Only `temp/*.epub`, and only files older than `max_age_seconds`, so a sweep
+    can never race an upload that is in flight. The reader decided against a
+    size cap on uploads (single user, own disk); this is the half of P3-10 that
+    was worth having.
+    """
+    staging = BASE_DIR / "temp"
+    if not staging.is_dir():
+        return 0
+    cutoff = time.time() - max_age_seconds
+    removed = 0
+    for leftover in staging.glob("*.epub"):
+        try:
+            if leftover.stat().st_mtime < cutoff:
+                leftover.unlink()
+                removed += 1
+        except OSError:
+            continue        # gone already, or not ours to remove: leave it
+    return removed
+
 
 @router.post("/upload")
 def upload_book(file: UploadFile = File(...)):

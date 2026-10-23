@@ -75,7 +75,7 @@ recipes are in Appendix A.
 | P3-7 | Low | Docs | Docstrings and SPEC that contradict the code ✔ applied | S |
 | P3-8 | Low | Dependencies | `httpx2` is a runtime dependency for a test-only need ✔ applied | S |
 | P3-9 | Low | AI | AI client is created per call; one `except` is unreachable ✔ applied | S |
-| P3-10 | Low | Operations | No upload size cap and no staging-directory sweep | S |
+| P3-10 | Low | Operations | No upload size cap and no staging-directory sweep ✔ applied (sweep; size cap declined) | S |
 | P3-11 | Low | UX | The unsupported reason is only a tooltip ✔ applied | S |
 | P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats | S |
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
@@ -1338,10 +1338,10 @@ whole suite passes with the shared client, which is the part that could have gon
 
 ---
 
-### P3-10 · No upload size cap and no staging-directory sweep
+### P3-10 · No upload size cap and no staging-directory sweep ✔ applied (sweep; size cap declined)
 
 **Severity:** Low · **Effort:** S · **Area:** Operations
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject — the reader declined the size cap
 
 **Where:** `routers/library.py:135-204`; `temp/`.
 
@@ -1354,6 +1354,18 @@ so this is hygiene rather than a DoS boundary.
 
 **Fix:** reject `file.size` above a configurable limit (e.g. `READER_MAX_UPLOAD_MB`, default
 100) with a named 413, and sweep `temp/*.epub` older than an hour at startup.
+
+**Applied, sweep only (2026-10-23, `routers/library.py` + `server.py` + `tests/test_library.py`):**
+the reader decided the size cap is unnecessary — a single user uploading to their own disk — so the
+upload path is untouched and no `READER_MAX_UPLOAD_MB` exists. What landed is the sweep:
+
+* `sweep_uploads(max_age_seconds=3600)` removes `temp/*.epub` older than an hour, and only those:
+  a young staging file may be an upload in flight, so the sweep cannot race one.
+* `server.py`'s lifespan calls it at startup, and prints what it removed. Verified against this
+  machine's own `temp/`: **the two EPUBs the finding found, orphaned since Oct 8, are gone** — the
+  suite's TestClients each run the lifespan, so the first full run after the change cleared them.
+* Tested with a two-hour-old staging file and a fresh one: the stale one goes, the young one
+  stays.
 
 ---
 

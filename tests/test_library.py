@@ -255,6 +255,37 @@ def test_a_card_shows_whole_book_progress_from_the_joined_row(
     assert "Completed" in isolated_client.get("/").text
 
 
+def test_the_startup_sweep_removes_orphaned_uploads(isolated):
+    """P3-10 (the sweep half): an interrupted upload cannot run its own
+    `finally`, so staging files accumulate silently. Only old ones go — a sweep
+    must never race an upload that is in flight.
+
+    The reader declined the size cap the finding also proposed: single user, own
+    disk.
+    """
+    import os
+    import time
+
+    import routers.library
+
+    staging = routers.library.BASE_DIR / "temp"
+    staging.mkdir(exist_ok=True)
+    old = staging / "orphan-old.epub"
+    fresh = staging / "orphan-fresh.epub"
+    old.write_bytes(b"left behind by a killed process")
+    fresh.write_bytes(b"an upload in flight")
+    two_hours_ago = time.time() - 7200
+    os.utime(old, (two_hours_ago, two_hours_ago))
+
+    try:
+        removed = routers.library.sweep_uploads()
+        assert removed >= 1, "the stale staging file was removed"
+        assert not old.exists()
+        assert fresh.exists(), "a young staging file is left alone"
+    finally:
+        fresh.unlink(missing_ok=True)
+
+
 def test_a_title_a_url_cannot_carry_is_slugged_out(isolated_client, isolated):
     """`#` opens a fragment and a raw `%` is an invalid escape, so neither may
     survive into a slug: `href="/read/C# in Depth"` asks the server for

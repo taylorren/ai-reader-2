@@ -42,12 +42,17 @@ def load_env():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Release the AI client when the app stops.
+    """Startup and shutdown work that is not per request.
 
-    It is shared for the app's lifetime (one pool, one TLS context), so it is
-    not closed per request — the loop that owns it is the one that closes it
-    (REVIEW P3-9).
+    At startup, clear staging files an interrupted upload left behind. At
+    shutdown, release the shared AI client — it is one pool for the app's life,
+    so the loop that owns it closes it (REVIEW P3-9, P3-10).
     """
+    from routers.library import sweep_uploads
+
+    orphans = sweep_uploads()
+    if orphans:
+        print(f"✓ Removed {orphans} orphaned upload(s) from temp/")
     yield
     from routers import get_ai_service
 
