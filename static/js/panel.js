@@ -40,11 +40,13 @@ window.ReaderPanel = (function () {
         selection: null,     // {text, block_id, context_before, context_after}
         highlightId: null,   // the highlight the open panel is about
         analysisId: null,
-        mode: "analysis",    // analysis | discussion | comment
+        mode: "analysis",    // analysis | discussion | comment | saved
         conversation: [],
         provider: "ollama_cloud",
         busy: false,
         saved: false,
+        editing: null,       // the saved analysis the panel is editing
+        editingDraft: false, // true while the edit box is open (P1-4)
     };
 
     const el = (id) => document.getElementById(id);
@@ -163,8 +165,16 @@ window.ReaderPanel = (function () {
         state.conversation = [];
         state.saved = false;
         state.selection = null;
+        // The edit draft must not outlive the panel it was opened in: a stale
+        // flag would make the next 保存 update *that* analysis instead of
+        // saving a new one (P1-4).
+        state.editing = null;
+        state.editingDraft = false;
         el("panel-selected").textContent = "";
         el("panel-body").innerHTML = "";
+        // The label belongs to the mode that set it (保存笔记 / 保存总结 /
+        // 保存修改), so it goes back to the default with everything else.
+        el("panel-save").textContent = "保存到数据库";
         el("discussion-log").hidden = true;
         el("discussion-log").innerHTML = "";
         el("discussion-input-row").hidden = true;
@@ -542,6 +552,8 @@ window.ReaderPanel = (function () {
     }
 
     async function saveCurrent() {
+        // An open edit box makes 保存修改 an update, not a new save (P1-4).
+        if (state.editingDraft) return saveEdit();
         if (state.saved) { toast("已经保存过了"); return; }
         let analysisType = "comment";
         let response = "";
@@ -605,18 +617,44 @@ window.ReaderPanel = (function () {
         }
     }
 
-    async function editCurrent() {
+    // Editing happens in the panel, in the same textarea a new note uses.
+    // `window.prompt` was the defect: it is a single-line box, so every stored
+    // analysis — Markdown with paragraphs, lists and headings — came back
+    // flattened onto one line the moment it was opened and saved, with no undo
+    // (REVIEW P1-4).
+    function editCurrent() {
         const analysis = state.editing;
         if (!analysis) return;
-        const edited = prompt("编辑批注：", analysis.response);
-        if (edited === null) return;
+        el("panel-body").innerHTML =
+            '<textarea id="comment-input" class="comment-input" rows="8"></textarea>';
+        const box = el("comment-input");
+        box.value = analysis.response;
+        box.focus();
+        showButtons({ save: true, delete: true });
+        el("panel-save").textContent = "保存修改";
+        state.editingDraft = true;   // saveCurrent() then PUTs this analysis
+    }
+
+    // The update half of an edit. The box is deliberately left in place when
+    // the request fails: the reader's draft is the only copy of their words.
+    async function saveEdit() {
+        const analysis = state.editing;
+        const box = el("comment-input");
+        const response = box ? box.value.trim() : "";
+        if (!analysis || !response) { toast("没有可保存的内容"); return; }
         try {
             await api(`/api/ai/update/${analysis.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ response: edited }),
+                body: JSON.stringify({ response: response }),
             });
+            state.editingDraft = false;
+            state.editing = null;
             toast("已更新");
+            // The panel paints saved analyses from the chapter's cached
+            // highlights, so the edit is fetched back before it is shown —
+            // otherwise the old text would be repainted over the new.
+            await refreshHighlights();
             showHighlight(state.highlightId);
         } catch (error) {
             toast(error.message, "error");

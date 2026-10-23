@@ -164,6 +164,40 @@ def test_an_analysis_is_saved_edited_and_deleted(isolated_client, isolated,
     assert db.get_highlight(highlight_id) is None
 
 
+def test_editing_a_note_keeps_its_paragraphs(isolated_client, isolated,
+                                             upload, db):
+    """The editor is the panel's textarea, so an edit must round trip Markdown
+    unchanged. The flattening was `window.prompt` — a single-line box — not
+    storage, and this pins the server half of that promise: what the box holds
+    is what the chapter API hands back for the repaint, and what the highlights
+    view shows (REVIEW P1-4).
+    """
+    slug = upload()
+    highlight_id = make_highlight(isolated_client, slug)
+    analysis_id = isolated_client.post("/api/ai/save", json={
+        "highlight_id": highlight_id, "analysis_type": "comment",
+        "prompt": "", "response": "one line to start with"}).json()["analysis_id"]
+
+    note = ("第一段：这一段的结尾在这里。\n\n- 要点一\n- 要点二\n\n"
+            "## 小标题\n\n第二段：结尾在这里。")
+    edited = isolated_client.put(f"/api/ai/update/{analysis_id}",
+                                 json={"response": note})
+    assert edited.status_code == 200
+    assert db.get_analysis(analysis_id)["response"] == note
+
+    # The two reads the reader makes afterwards: the chapter API the panel
+    # repaints from, and the highlights view.
+    chapter = isolated_client.get(f"/api/highlights/{slug}/0").json()
+    repainted = [analysis for highlight in chapter["highlights"]
+                 for analysis in highlight["analyses"]
+                 if analysis["id"] == analysis_id]
+    assert repainted and repainted[0]["response"] == note
+
+    view = isolated_client.get(f"/highlights/{slug}").text
+    for fragment in ("第一段", "要点一", "小标题", "第二段"):
+        assert fragment in view, fragment
+
+
 def test_a_second_analysis_keeps_the_highlight(isolated_client, isolated,
                                                upload, db):
     slug = upload()

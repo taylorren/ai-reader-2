@@ -51,7 +51,7 @@ recipes are in Appendix A.
 | P1-1 | High | Front-end | Every toast notification is invisible ✔ applied | S |
 | P1-2 | High | Routing / slugs | Titles containing `#` (or `%`) break every link to the book ✔ applied | S |
 | P1-3 | Medium | AI | The AI gets the selection but never the surrounding context ✔ applied | S |
-| P1-4 | High | Front-end | Editing a note flattens it to one line | M |
+| P1-4 | High | Front-end | Editing a note flattens it to one line ✔ applied | M |
 | P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights | M |
 | P1-6 | High | Reading state | Following an in-book link never saves progress | S |
 | P2-1 | High | Security | Book files are served at the app origin with no CSP | S |
@@ -352,10 +352,10 @@ migrated and no schema changes.
 
 ---
 
-### P1-4 · Editing a note flattens it to one line
+### P1-4 · Editing a note flattens it to one line ✔ applied
 
 **Severity:** High · **Effort:** M · **Area:** Front-end
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/panel.js:588-604` (`editCurrent`), specifically `:591`.
 
@@ -385,6 +385,44 @@ function editCurrent() {
 
 **Verify:** open a saved analysis with two paragraphs, edit, save, reload — both paragraphs
 survive.
+
+**Applied (2026-10-23, `static/js/panel.js` + `tests/test_ai.py`):**
+
+* `editCurrent()` — the `prompt()` dialog is gone; the note opens in the panel's own
+  `#comment-input` textarea (`rows="8"`, focused, pre-filled), the save button reads 保存修改, and
+  `state.editingDraft` marks the open edit. Exactly the shape the finding proposes.
+* `saveCurrent()` — an open draft routes to a new `saveEdit()`, which PUTs to
+  `/api/ai/update/{analysis.id}` and then `await refreshHighlights()` before re-rendering. That
+  refresh is not cosmetic: `showHighlight()` paints from the chapter's **cached** highlights, so
+  without it the panel repainted the *old* text over the new — a second, quieter half of "editing
+  does not work" that the finding does not mention. The box is deliberately left in place when the
+  PUT fails, so a failed save cannot eat the reader's draft.
+* `state` — `editing` and `editingDraft` are now declared fields, and `resetPanel()` clears both.
+  Without that, dismissing a panel mid-edit left `editingDraft` set and the *next* 保存 would have
+  PUT to the analysis the reader had walked away from.
+* `resetPanel()` also restores the save label (`保存到数据库`). That is **P3-1's first clause**, and
+  it is here because this change is what makes it necessary: 保存修改 would otherwise leak into the
+  next panel — the exact leak P3-1 describes, now with a third label. P3-1's other two clauses
+  (`state.summary`, `state.analysisType`) are untouched.
+* `tests/test_ai.py::test_editing_a_note_keeps_its_paragraphs` — the server half of the Verify
+  line: a multi-paragraph Markdown note (paragraphs, a list, a heading) survives save → edit, and
+  comes back intact from both reads the panel makes afterwards (the chapter API it repaints from,
+  and the highlights view).
+
+**Client-side evidence.** The repo has no JS runner (T1, not accepted), so the panel was driven in
+a throwaway stub DOM — `/tmp/p14_dom.js`, the same technique the `<p>　</p>` fix used — loading
+`panel.js` unmodified except for one injected line exporting the private functions. Every click in
+it goes through the listener the panel registered itself. 15 checks, against the real wiring:
+opening the editor creates the textarea, the **whole** note is in it with its newlines, the box is
+focused, the label reads 保存修改, the save sends `PUT /api/ai/update/7` and creates nothing, the
+body carries both paragraphs byte-for-byte, the panel then repaints the *new* text, and a
+dismissed draft cannot hijack a later save. Pointed at the pre-fix `panel.js` (with `prompt`
+stubbed to behave as a browser's single-line dialog), the same harness reports 14 failures, and
+the PUT body it captures is the defect in one line:
+
+```
+PUT /api/ai/update/7 {"response":"第一段：这一段的结尾在这里。 - 要点一 - 要点二 ## 小标题 第二段：结尾在这里。"}
+```
 
 ---
 
@@ -864,6 +902,12 @@ analysis type look wrong. A stale `state.summary` sits in memory between panels.
 
 **Fix:** in `resetPanel()`: `el("panel-save").textContent = "保存到数据库";` and clear
 `state.summary = null; state.editing = null; state.analysisType = null;`.
+
+**Partly applied with P1-4 (2026-10-23):** the first clause landed — `resetPanel()` restores
+`保存到数据库`, and clears `state.editing` — because P1-4 adds a third label (保存修改) and its
+draft flag, and both must be reset or the leak gets worse. What remains here is `state.summary`
+and `state.analysisType` (a stale summary and a stale type between panels), plus the triage
+decision. Left unticked.
 
 ---
 
@@ -1405,7 +1449,7 @@ P2-1 (CSP on book files, with T5) → P2-6 (`get_db` lock) → P2-7 (`setdefault
 (`/api/text`).
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
-P1-4 (textarea editing) → P1-5 (frame keydown + menu semantics) → P3-1 → P3-2.
+~~P1-4 (textarea editing)~~ ✔ applied → P1-5 (frame keydown + menu semantics) → P3-1 → P3-2.
 
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
 P2-8 (progress ordering) → P2-10 (context-aware painting / block anchors) → P3-15 (remove the
