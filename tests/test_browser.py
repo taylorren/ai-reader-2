@@ -1,0 +1,241 @@
+"""T1's browser smoke: the reader shell driven by a real browser.
+
+Everything else in the suite drives the reader's JavaScript against a stub DOM
+(tests/js/) or asserts server-rendered HTML. Three of the review's findings
+live in the browser's own rules and can only be seen here:
+
+    P3-3  a shown toast's *computed* opacity — the class was set, the rule was
+          missing, so the message reached the DOM and stayed invisible
+    P1-4  a saved mark, actually painted into the frame's document, on the
+          first load and again after a reload
+    P2-1  the book's own <script>, which must never execute — neither inside
+          the reader nor when the book's document is opened directly
+
+The whole module skips unless playwright and its browser are both present:
+
+    uv add --dev playwright && uv run playwright install chromium
+
+That is the one dependency the suite cannot work around, and the findings here
+are exactly the ones a stub DOM cannot see: a stylesheet rule that never
+applied, a sandbox that did its job.
+"""
+
+from __future__ import annotations
+
+import socket
+import threading
+import time
+from urllib.parse import quote
+
+import pytest
+
+sync_api = pytest.importorskip(
+    "playwright.sync_api",
+    reason="playwright is not installed (uv add --dev playwright)",
+)
+
+import httpx  # noqa: E402
+
+from fixtures import write_scripted_epub  # noqa: E402
+
+
+# -- the app, over real HTTP ------------------------------------------------
+
+@pytest.fixture
+def base_url(isolated):
+    """The real app on a real port, over the `isolated` fixture's directories.
+
+    A browser cannot drive an ASGI object, so uvicorn runs in a thread against
+    the same module globals the fixture patched: the pages a browser loads are
+    the isolated library's, never the developer's.
+    """
+    import uvicorn
+
+    import server
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    instance = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1",
+                                             port=port, log_level="warning"))
+    thread = threading.Thread(target=instance.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 15
+    while not instance.started and time.time() < deadline:
+        time.sleep(0.02)
+    if not instance.started:
+        raise RuntimeError("the test server did not start")
+
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        instance.should_exit = True
+        thread.join(timeout=15)
+
+
+@pytest.fixture(scope="module")
+def browser():
+    """One Chromium for the module — or a skip that says how to get one."""
+    with sync_api.sync_playwright() as playwright:
+        try:
+            instance = playwright.chromium.launch()
+        except Exception as error:        # noqa: BLE001 — the message is the reason
+            pytest.skip(f"playwright's browser is not installed: {error}")
+        yield instance
+        instance.close()
+
+
+# -- helpers ----------------------------------------------------------------
+
+def upload_book(base_url, path, name="book.epub"):
+    """Upload a fixture EPUB the way the library page's own form does."""
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.post("/upload", files={
+            "file": (name, path.read_bytes(), "application/epub+zip")})
+    assert response.status_code == 200, response.text
+    return response.json()["slug"]
+
+
+def chapter_payload(base_url, slug, index=0):
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.get(f"/api/text/{quote(slug)}/{index}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def seed_highlight(base_url, slug, selected_text, block_id=None, index=0):
+    """A stored mark, through the route that exists to store exactly that."""
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.post("/api/highlight", json={
+            "book_id": slug, "chapter_index": index,
+            "selected_text": selected_text, "block_id": block_id})
+    assert response.status_code == 200, response.text
+    return response.json()["highlight_id"]
+
+
+def collapsed(text):
+    """Text with its whitespace flattened: the spacing is the book's, not ours."""
+    return " ".join(text.split())
+
+
+def settled_opacity(page, selector, deadline=2.0):
+    """The computed opacity once the transition has settled.
+
+    `.toast.visible` carries a transition, so the value read the instant the
+    class lands is mid-flight — 0.07, not 1 — and asserting on it would fail
+    the fix it is meant to pin. Polling to a deadline also keeps a failure a
+    value to read rather than a timeout to interpret.
+    """
+    end = time.time() + deadline
+    while True:
+        opacity = page.eval_on_selector(
+            selector, "node => getComputedStyle(node).opacity")
+        if opacity == "1" or time.time() >= end:
+            return opacity
+        time.sleep(0.05)
+
+
+def assert_mark(page, snippet, highlight_id):
+    """The frame carries the mark, wrapped around exactly the saved text."""
+    mark = page.frame_locator("#chapter-frame").locator(
+        "mark.reader-highlight").first
+    mark.wait_for()
+    assert mark.get_attribute("data-highlight-id") == str(highlight_id)
+    assert collapsed(mark.inner_text()) == collapsed(snippet)
+
+
+# -- the three things only a browser can see --------------------------------
+
+def test_a_shown_toast_is_actually_visible(browser, base_url, upload):
+    """P3-3: `toast()` set the class `visible` and reader.css had no rule for
+    it, so the message reached the DOM and stayed at `opacity: 0` — invisible
+    on screen. A stub DOM cannot see a stylesheet rule that never applied.
+
+    The trigger is a stored highlight whose text is not in the chapter: the
+    shell reports it (「本章有 N 条高亮未能定位」) rather than losing it
+    silently, which needs no AI, no clipboard and no key press.
+    """
+    slug = upload()
+    seed_highlight(base_url, slug, "这段文字不在这一章里")
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        toast = page.locator("#toast")
+        page.wait_for_function(
+            "document.querySelector('#toast').classList.contains('visible')")
+        assert toast.inner_text() == "本章有 1 条高亮未能定位"
+        assert settled_opacity(page, "#toast") == "1", (
+            "the toast carries the class `visible` and is still invisible — "
+            "reader.css has no rule for it")
+    finally:
+        page.close()
+
+
+def test_a_saved_mark_is_painted_into_the_frame(browser, base_url, upload):
+    """P1-4: a highlight row is not a mark on screen until the shell paints it
+    into the frame's own document. Painted on the first load, and painted again
+    after a reload — which is where a saved mark has to come back from.
+    """
+    slug = upload()
+    payload = chapter_payload(base_url, slug)
+    block = next(item for item in payload["blocks"] if item["kind"] == "paragraph")
+    snippet = block["text"][:40]
+    highlight_id = seed_highlight(base_url, slug, snippet, block["id"])
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        assert_mark(page, snippet, highlight_id)
+
+        page.reload()
+        assert_mark(page, snippet, highlight_id)
+    finally:
+        page.close()
+
+
+def test_a_books_own_script_never_runs(browser, base_url, isolated):
+    """P2-1's other half: the reader serves the book's bytes untouched, so a
+    book's `<script>` and its inline handler do reach the browser — and must
+    not execute. Inside the reader the frame's sandbox stops them (it grants
+    `allow-same-origin`, never `allow-scripts`); opened directly, the
+    response's `Content-Security-Policy: script-src 'none'` does.
+
+    The control at the end fetches the same document with that header stripped
+    away, and the markers appear — so their absence above is the guard doing
+    the work, not a fixture that could never have run in the first place.
+    """
+    slug = upload_book(base_url, write_scripted_epub(isolated / "scripted.epub"))
+    chapter_path = chapter_payload(base_url, slug)["chapter_path"]
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("h1").wait_for()          # the chapter really rendered
+        assert frame.locator("html").get_attribute("data-book-script-ran") is None
+        assert frame.locator("html").get_attribute("data-book-handler-ran") is None
+
+        page.goto(f"{base_url}/book/{quote(slug)}/{chapter_path}")
+        assert page.locator("html").get_attribute("data-book-script-ran") is None
+        assert page.locator("html").get_attribute("data-book-handler-ran") is None
+    finally:
+        page.close()
+
+    context = browser.new_context()
+    control = context.new_page()
+    try:
+        def strip_csp(route):
+            response = route.fetch()
+            headers = {name: value for name, value in response.headers.items()
+                       if name.lower() != "content-security-policy"}
+            route.fulfill(response=response, headers=headers)
+
+        control.route("**/book/**", strip_csp)
+        control.goto(f"{base_url}/book/{quote(slug)}/{chapter_path}")
+        assert control.locator("html").get_attribute("data-book-script-ran") == "1"
+        assert control.locator("html").get_attribute("data-book-handler-ran") == "1"
+    finally:
+        context.close()

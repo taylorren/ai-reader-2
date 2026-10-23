@@ -25,4 +25,8 @@ dev = [
     # carry a package they never import (REVIEW P3-8). `uv sync` installs the dev
     # group by default, so development and CI still get it.
     "httpx2>=2.0",
+    # T1's browser smoke (tests/test_browser.py). The Python package is only half
+    # of it: the test also needs a browser — `uv run playwright install chromium`
+    # — and skips cleanly without one.
+    "playwright>=1.64.1",
 ]

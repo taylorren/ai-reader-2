@@ -455,3 +455,54 @@ def write_multiblock_note_epub(path) -> Path:
         zf.writestr("OEBPS/content.opf", MULTIBLOCK_OPF)
         zf.writestr("OEBPS/ch1.xhtml", MULTIBLOCK_CHAPTER)
     return Path(path)
+
+
+# A book that ships its own JavaScript, in both of the vectors a book has: a
+# `<script>` element and an inline handler. The reader serves the book's bytes
+# untouched and relies on two guards — the frame's sandbox (no `allow-scripts`)
+# and the response's `script-src 'none'` — so the only way to show that a
+# book's code never runs is in a browser. Each vector sets its own marker, and
+# the test loads this markup with the guard stripped away to show the markers
+# are real rather than a fixture that could never have run.
+SCRIPTED_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>Chapter One</title>
+<script>document.documentElement.setAttribute("data-book-script-ran", "1");</script>
+</head>
+<body onload="document.documentElement.setAttribute('data-book-handler-ran', '1')">
+  <h1 id="top">Scripted Book</h1>
+  <p>A book that carries its own script, and a reader that must not run it.
+     The prose is here because a chapter is a chapter of text; the two markers
+     above are what the browser test looks for, and their absence is the guard
+     doing its work rather than an accident of the fixture.</p>
+</body>
+</html>
+"""
+
+SCRIPTED_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Scripted Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:scripted-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+
+def write_scripted_epub(path) -> Path:
+    """A book whose only chapter carries a script and an inline handler."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", SCRIPTED_OPF)
+        zf.writestr("OEBPS/ch1.xhtml", SCRIPTED_CHAPTER)
+    return Path(path)

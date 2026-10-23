@@ -17,6 +17,16 @@ uv run pytest -q
 own test runner — no npm, no build step, no jsdom — and skips them cleanly when
 `node` is not installed. `node --test "tests/js/*.test.js"` runs them directly.
 
+Three tests in `tests/test_browser.py` drive the reader in a real browser
+(Playwright) for the three things a stub DOM cannot see: a shown toast's
+*computed* opacity, a saved mark painted into the book's own document, and a
+book's own `<script>` not running — in the frame and when the chapter URL is
+opened directly. They skip cleanly unless a browser is present:
+
+```bash
+uv run playwright install chromium     # ~130 MB, once
+```
+
 Static assets are read from disk on every request, but Python is loaded once at
 startup: after editing a router or a model, restart the server
 (`systemctl restart reader3`). A running process serving the new `panel.js`

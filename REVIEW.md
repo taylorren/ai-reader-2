@@ -81,7 +81,7 @@ recipes are in Appendix A.
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
 | P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
 | P3-15 | Low | API | Dead API and schema surface ✔ applied (removals + docstrings; three more found) | S |
-| T1 | High | Testing | No front-end tests ✔ applied (browser smoke still open) | L |
+| T1 | High | Testing | No front-end tests ✔ applied (all three steps) | L |
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
 | T3 | Medium | Testing | No tests on prompt content or save validation ✔ applied | S |
 | T4 | Low | Testing | No cost test for the library render ✔ applied | S |
@@ -409,9 +409,10 @@ survive.
   comes back intact from both reads the panel makes afterwards (the chapter API it repaints from,
   and the highlights view).
 
-**Client-side evidence.** The repo has no JS runner (T1, not accepted), so the panel was driven in
-a throwaway stub DOM — `/tmp/p14_dom.js`, the same technique the `<p>　</p>` fix used — loading
-`panel.js` unmodified except for one injected line exporting the private functions. Every click in
+**Client-side evidence.** The repo had no JS runner when this was written (T1, since applied —
+`tests/js/`), so the panel was driven in a throwaway stub DOM — `/tmp/p14_dom.js`, the same technique
+the `<p>　</p>` fix used — loading `panel.js` unmodified except for one injected line exporting the
+private functions. Every click in
 it goes through the listener the panel registered itself. 15 checks, against the real wiring:
 opening the editor creates the textarea, the **whole** note is in it with its newlines, the box is
 focused, the label reads 保存修改, the save sends `PUT /api/ai/update/7` and creates nothing, the
@@ -493,8 +494,10 @@ from inside the book, a popped-out image stays modal, a book's form keeps its ke
 item does the action, and Ctrl/Cmd+K with nothing selected opens nothing. Against the pre-P1-5
 scripts exactly those five keyboard cases fail; with the fix, 31 of 31 front-end cases pass.
 
-**Not verified here:** a real screen reader and real focus order need a browser engine (T1's open
-step). The semantics are in the markup and the handlers, and the guards cover the wiring.
+**Not verified here:** a real screen reader and real focus order need assistive technology, not a
+browser engine. T1's Playwright smoke now drives this page in Chromium (a saved mark painted into
+the frame, a toast's computed opacity, a book's script blocked), but the ARIA semantics and the
+focus order are still argued from the markup and the handlers, which the guards cover.
 
 ---
 
@@ -600,9 +603,12 @@ chapter URL. `script-src 'none'` also blocks inline handlers; styles, images and
 so model A renders unchanged — the frame's sandbox already stopped the scripts, and this closes
 the direct-navigation path the sandbox cannot.
 
-**What could not be checked here:** the execution half of the Verify line needs a browser engine,
-and this environment has none (see T1). The header is pinned; "the planted script does not run" is
-the browser's job and would be the first assertion of the Playwright smoke if it is added.
+**The execution half is now checked in a browser (2026-10-23).** T1's smoke loads a book that ships
+both vectors — a `<script>` element and an inline `onload` handler, each setting its own marker —
+and asserts neither marker appears: not in the reader's frame, and not when the chapter URL is
+opened directly. The control re-fetches the same document with the CSP header stripped, and both
+markers appear, so the assertion is the guard doing the work rather than a fixture that could never
+have run. Removing the header from the route fails that test at the direct-navigation assertion.
 
 ---
 
@@ -911,8 +917,8 @@ A → B → A the frame is scrolled back to 50% of the chapter (the test that ca
 Against the pre-P2-8 `reader.js` both client tests fail.
 
 **Not reproduced literally:** the Verify line's "throttle the network, click next twice quickly"
-needs a browser and a network shaper (see T1's open step). The ordering is what makes that case
-safe, and it is asserted directly instead of by timing.
+needs a browser and a network shaper. The browser arrived with T1's smoke; throttling does not, so
+the ordering is what makes that case safe, and it is asserted directly instead of by timing.
 
 ---
 
@@ -1590,7 +1596,7 @@ why it was worth doing as its own pass rather than mechanically.
 
 ## Test gaps
 
-### T1 · No front-end tests ✔ applied — steps 1 and 2, and step 3 without a browser
+### T1 · No front-end tests ✔ applied — all three steps, browser smoke included
 
 **Severity:** High · **Effort:** L · **Area:** Testing
 **Review:** ☑ accept ☐ defer ☐ reject
@@ -1674,34 +1680,40 @@ that a failed one sets `toast visible error` and leaves the save on offer. The s
 what T1's step 3 called a browser for; it is honest about the boundary: the text *selection* is
 handed in (a real Range needs a real document), and nothing is rendered.
 
-**What is still open: the Playwright smoke — and an attempt was made (2026-10-23).** I wrote the
-test and the fixture for it, and tried to install the dependency here. The install is what stopped
-it, and the reason is concrete: **this machine fetches PyPI at ~28 KB/s** (`curl` measured, not
-guessed). The `playwright` wheel alone is 46 MB — about 28 minutes — and the Chromium build it
-needs is another ~130 MB from a second CDN. `uv add --dev playwright` timed out twice; the wheel
-was fetched once but the install stalled with the process 16 minutes old and one second of CPU
-used. The dependency, the test and the fixture were therefore reverted rather than committed:
-`uv sync --dry-run` reports "Would make no changes", so nothing about the environment moved, and
-the suite stays the trustworthy signal it has been (no test in it has ever failed to run).
+**Step 3, the browser smoke — landed (2026-10-23, `tests/test_browser.py` + `write_scripted_epub`).**
+The first attempt was reverted because the dependency would not install: this machine fetched PyPI at
+~28 KB/s and the wheel plus Chromium are 46 MB and 130 MB. It landed on the second attempt for a
+reason worth recording — **the network was the only obstacle, and it was solvable.** A nearby PyPI
+mirror answered at 2 MB/s, and the browser came through the LAN proxy (643 KB/s to PyPI, 771 KB/s to
+the CDN); playwright's own downloader was pointed at a local mirror of the exact URL with
+`PLAYWRIGHT_DOWNLOAD_HOST`, so playwright still did the verification and extraction — nothing was
+hand-placed in its cache. The lesson: "the link is too slow" is a reason to find a mirror, not a
+reason to drop the test.
 
-The environment is otherwise ready for it: the shared libraries Chromium needs are all present
-(`libnss3`, `libatk`, `libgbm`, `libasound`, `libxkbcommon`), and no root is required — only
-bandwidth. Two commands, on a link that can carry 46 MB plus 130 MB:
+Three tests, each pinning something a stub DOM cannot see:
 
-```bash
-uv add --dev playwright
-uv run playwright install chromium
-```
+* **P3-3 — the toast is visible.** A stored highlight whose text is not in the chapter makes the
+  shell report it (「本章有 1 条高亮未能定位」): a toast with no AI, no clipboard and no key press
+  involved. The assertion is the *computed* opacity, and writing it caught a real subtlety —
+  `.toast.visible` carries a transition, so the value read the instant the class lands is `0.07`, not
+  `1`; asserting on that would have failed the very fix it pins, so the test polls to the settled
+  value. Emptied of its declaration, the rule fails the test with the value in the message: "the
+  toast carries the class `visible` and is still invisible — reader.css has no rule for it".
+* **P1-4 — a saved mark is painted.** A highlight seeded through `POST /api/highlight`, then the
+  frame's own document is asked for `mark.reader-highlight`: the right `data-highlight-id`, wrapped
+  around exactly the saved text — on the first load and again after a reload, which is where a saved
+  mark has to come back from.
+* **P2-1's execution half — the book's script never runs.** `write_scripted_epub` ships both vectors
+  a book has, a `<script>` element and an inline `onload` handler, each setting its own marker.
+  Inside the reader the frame's sandbox stops them; opened directly — the reader's other way in — the
+  response's CSP does. The control at the end re-fetches the same document with the CSP stripped by
+  `page.route`, and the markers appear, so their absence above is the guard working rather than a
+  fixture that could never have run.
 
-What it would assert, and why it is worth more than another stub: that the toast is *visible*
-(computed `opacity: 1` — the P1-1 bug, which no stylesheet in the repo can hide any more), that a
-saved mark is *painted* in the book's own document before and after a reload, and that a script a
-book ships does *not* run — the execution half of P2-1's Verify line, which a header assertion can
-only argue by mechanism. The test as drafted drives the real server over an isolated library
-(`uvicorn` on an ephemeral port with `BOOKS_DIR`/`DB_PATH` monkeypatched), stubs the AI at the
-network edge with `page.route`, makes a real selection with a `Range` inside the frame, and fires
-the `mouseup` the panel listens for. Re-adding it is minutes of work; it is not in the tree because
-it has never been executed, and a test that has never run is not evidence.
+Three reverts were used to check the tests are not decorative: the `.toast.visible` declaration, the
+CSP header, and a missing seeded highlight. The suite reports **147 passed, 4 skipped** with a
+browser present; where playwright or its browser is absent the module skips cleanly and says how to
+install them.
 
 ---
 
@@ -1929,6 +1941,6 @@ out — use a longer timeout for the experiment.
 P2-10 (context-aware painting / block anchors) → P2-5 (cache refcounts, if the 8-book limit is
 ever raised).
 
-**Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; P3-14 and
-T1 are the two structural investments, best done together when the next feature touches
-`panel.js`.
+**Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; T1 landed
+(class guard, Node module tests, stub-DOM flows and the Playwright smoke), leaving P3-14 the one
+structural investment left, best done when the next feature touches `panel.js`.
