@@ -255,10 +255,14 @@ class AIService:
             prompt=user_message, provider=provider,
             history=list(conversation_history))
 
-    async def summarize_conversation(self, text: str,
-                                     conversation_history: list[dict],
+    async def summarize_conversation(self, conversation_history: list[dict],
                                      provider: str = "ollama") -> str:
-        """Collapse a whole discussion into one comprehensive analysis."""
+        """Collapse a whole discussion into one comprehensive analysis.
+
+        The transcript is the input — the selection is its first user message —
+        so there is no separate `text` parameter: there used to be, and it was
+        never read (REVIEW P3-15).
+        """
         prompt = """基于我们的整个对话历史，请创建一个综合性的学术分析总结。
 
 请创建综合总结，涵盖以下维度：

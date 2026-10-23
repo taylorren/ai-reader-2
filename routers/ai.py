@@ -93,14 +93,17 @@ class DiscussionStartRequest(BaseModel):
 
 
 class DiscussionContinueRequest(BaseModel):
-    selected_text: str
+    """One turn. `selected_text` is deliberately absent: the selection is the
+    first user message of `conversation_history`, which the model already has —
+    the field was accepted and never read (REVIEW P3-15)."""
     conversation_history: list[ConversationMessage]
     user_message: str
     provider: str = "ollama_cloud"
 
 
 class DiscussionSummarizeRequest(BaseModel):
-    selected_text: str
+    """The whole discussion, as one analysis. The transcript is the input: the
+    selection is its first message, so no separate field is needed."""
     conversation_history: list[ConversationMessage]
     provider: str = "ollama_cloud"
 
@@ -230,8 +233,7 @@ async def summarize_discussion(req: DiscussionSummarizeRequest):
     provider = _provider(req.provider)
     try:
         summary = await get_ai_service().summarize_conversation(
-            req.selected_text, _history(req.conversation_history),
-            provider=provider)
+            _history(req.conversation_history), provider=provider)
     except AIServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"summary": summary, "provider_used": provider, "status": "success",

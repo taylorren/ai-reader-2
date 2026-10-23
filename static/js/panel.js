@@ -44,7 +44,6 @@ window.ReaderPanel = (function () {
         highlights: {},      // chapter index -> highlights
         selection: null,     // {text, block_id, context_before, context_after}
         highlightId: null,   // the highlight the open panel is about
-        analysisId: null,
         mode: "analysis",    // analysis | discussion | comment | saved
         conversation: [],
         summary: null,       // the discussion summary waiting to be saved
@@ -167,7 +166,6 @@ window.ReaderPanel = (function () {
 
     function resetPanel() {
         state.highlightId = null;
-        state.analysisId = null;
         state.mode = "analysis";
         state.conversation = [];
         state.saved = false;
@@ -195,7 +193,10 @@ window.ReaderPanel = (function () {
     }
 
     function showButtons(visible) {
-        for (const name of ["save", "edit", "summarize", "delete"]) {
+        // No 编辑笔记 button: each saved analysis carries its own 编辑, which is
+        // where editing belongs. The panel-wide button was wired but never
+        // shown, so it was an unreachable control (REVIEW P3-15).
+        for (const name of ["save", "summarize", "delete"]) {
             const button = el("panel-" + name);
             button.hidden = !visible[name];
         }
@@ -235,7 +236,6 @@ window.ReaderPanel = (function () {
         el("toggle-panel").addEventListener("click", () => openPanel());
         el("panel-save").addEventListener("click", () => saveCurrent());
         el("panel-delete").addEventListener("click", () => deleteCurrent());
-        el("panel-edit").addEventListener("click", () => editCurrent());
         el("panel-summarize").addEventListener("click", () => summarizeDiscussion());
         el("discussion-send").addEventListener("click", () => sendDiscussion());
         for (const item of document.querySelectorAll("#context-menu .context-menu-item")) {
@@ -554,7 +554,8 @@ window.ReaderPanel = (function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    selected_text: state.selection.text,
+                    // No `selected_text`: the selection is the first message of
+                    // the history, and the field was never read (P3-15).
                     conversation_history: state.conversation,
                     user_message: message,
                     provider: state.provider,
@@ -578,7 +579,8 @@ window.ReaderPanel = (function () {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    selected_text: state.selection.text,
+                    // The transcript is the input; the selection is its first
+                    // message (P3-15).
                     conversation_history: state.conversation,
                     provider: state.provider,
                 }),

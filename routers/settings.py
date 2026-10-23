@@ -54,6 +54,12 @@ def update_settings(settings: SettingsUpdate):
 
 
 class ProgressUpdate(BaseModel):
+    """A reading position: the chapter, and how far down it the reader is.
+
+    `anchor` is written but never read back: it is the raw material for a
+    stronger anchor (P2-10, which is undecided — see REVIEW.md), so it stays
+    rather than being removed as dead surface.
+    """
     book_id: str
     chapter_index: int
     scroll_percent: float = 0.0

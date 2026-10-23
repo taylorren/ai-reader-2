@@ -120,7 +120,15 @@ def store_highlight(book_id: str, chapter_index: int, selected_text: str,
 
 @router.post("/api/highlight")
 def create_highlight(req: HighlightRequest):
-    """Save a highlight. Its analyses arrive later, one endpoint at a time."""
+    """Store a bare mark — a highlight with no analysis yet.
+
+    The *app* does not call this: the panel saves a mark and its content in one
+    act through `/api/ai/save`, which is what keeps an unsaved explanation from
+    leaving a mark behind. This endpoint exists for the two things that need a
+    bare mark on purpose — the tests, which use it to build the "highlight with
+    no analyses" state the views must render, and any future import that brings
+    marks over without their text. It is kept, not forgotten (REVIEW P3-15).
+    """
     highlight_id = store_highlight(
         req.book_id, req.chapter_index, req.selected_text,
         chapter_path=req.chapter_path, block_id=req.block_id,

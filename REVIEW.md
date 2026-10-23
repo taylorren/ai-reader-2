@@ -80,7 +80,7 @@ recipes are in Appendix A.
 | P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats | S |
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
 | P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
-| P3-15 | Low | API | Dead API and schema surface | S |
+| P3-15 | Low | API | Dead API and schema surface ✔ applied (removals + docstrings; three more found) | S |
 | T1 | High | Testing | No front-end tests ✔ applied (browser smoke still open) | L |
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
 | T3 | Medium | Testing | No tests on prompt content or save validation ✔ applied | S |
@@ -1505,10 +1505,10 @@ directly. Pure refactor — the tests already cover each helper.
 
 ---
 
-### P3-15 · Dead API and schema surface
+### P3-15 · Dead API and schema surface ✔ applied (removals + docstrings; three more found)
 
 **Severity:** Low · **Effort:** S · **Area:** API
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/highlights.py:116-123` (`POST /api/highlight`), `database.py:272-286`
 (`analyses_for_book`), `routers/settings.py:56-60` (`anchor`).
@@ -1524,6 +1524,35 @@ with its content" rule the last commit established.
 **Fix:** remove the endpoint (and its test), `analyses_for_book()`, and `ProgressUpdate.anchor`
 — or, if they are intentionally kept for the coming export/P5 work, say so in the docstring so
 the next reader does not delete them.
+
+**Applied (2026-10-23, `database.py`, `routers/`, `static/js/panel.js`, `templates/reader.html`,
+tests):** the finding offers removal *or* a docstring, and the answer differs per item — which is
+why it was worth doing as its own pass rather than mechanically.
+
+* **Removed:** `analyses_for_book()`. `grep -rn analyses_for_book --include='*.py'` finds the
+  definition and nothing else — not one caller, not one test.
+* **Kept, with a docstring saying why:** `POST /api/highlight` is the only way to create a *bare*
+  mark, and both AI and highlights test suites use it as their fixture builder for the "highlight
+  with no analyses" state the views have to render (the panel never calls it — it saves mark and
+  content in one act through `/api/ai/save`). `ProgressUpdate.anchor` is written to the column and
+  never read back, but it is the raw material for P2-10, which is *undecided*: removing it now
+  would pre-empt that decision, so it is documented instead. Both say who may delete them.
+
+**Three more instances found while doing it**, none of them in the review:
+
+* **`#panel-edit` (编辑笔记) was unreachable.** `showButtons()` is called nine times and never with
+  `edit: true`, so the button never appeared; editing is reached from each saved analysis's own
+  编辑. The button, its listener and its entry in `showButtons()` are gone.
+* **`state.analysisId` was write-only** — set to `null` in `resetPanel()` and never read. Gone.
+* **The discussion endpoints claimed a field they never read.**
+  `DiscussionContinueRequest.selected_text` was unused, and `DiscussionSummarizeRequest.selected_text`
+  fed `summarize_conversation(text, …)` whose `text` parameter the service ignored (its prompt is
+  built from the transcript, whose first message *is* the selection). Both fields, the dead
+  parameter and the two payload lines in `panel.js` are gone; the models now say why the selection
+  needs no field of its own, and a flow test asserts the summarize payload carries the transcript
+  and no `selected_text`.
+
+143 passed, 4 skipped; 33 front-end cases green.
 
 ---
 

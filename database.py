@@ -307,22 +307,6 @@ class Database:
         finally:
             conn.close()
 
-    def analyses_for_book(self, book_id: str) -> list[dict]:
-        """Every analysis for a book, each carrying its highlight's fields."""
-        conn = self._connect()
-        try:
-            rows = conn.execute("""
-                SELECT a.*, h.book_id AS book_id, h.chapter_index AS chapter_index,
-                       h.chapter_path AS chapter_path, h.selected_text AS selected_text
-                FROM ai_analyses AS a
-                JOIN highlights AS h ON h.id = a.highlight_id
-                WHERE h.book_id = ?
-                ORDER BY a.id
-            """, (book_id,)).fetchall()
-            return [dict(row) for row in rows]
-        finally:
-            conn.close()
-
     def get_analysis(self, analysis_id: int) -> dict | None:
         conn = self._connect()
         try:

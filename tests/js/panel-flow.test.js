@@ -259,6 +259,10 @@ test("one panel's label and state do not leak into the next", async () => {
     await page.settle(); await page.settle();
     assert.equal(page.el("panel-save").textContent, "保存总结");
     assert.equal(page.P.state.summary, "a summary of the discussion");
+    // The transcript is the input; no `selected_text` is sent (P3-15).
+    const summarized = page.body(page.lastRequest(/\/api\/ai\/discussion\/summarize$/));
+    assert.equal(summarized.selected_text, undefined);
+    assert.equal(summarized.conversation_history.length, 2);
 
     // The reader closes the panel and selects something else — a real click
     // arrives with a fresh selection from the frame's mouseup handler.

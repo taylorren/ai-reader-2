@@ -101,7 +101,7 @@ def test_continue_discussion_does_not_duplicate_the_user_message(
         {"role": "user", "content": "my question"},
     ]
     response = isolated_client.post("/api/ai/discussion/continue", json={
-        "selected_text": "sample text", "conversation_history": history,
+        "conversation_history": history,
         "user_message": "my question", "provider": "ollama"})
     assert response.status_code == 200
     body = response.json()
@@ -113,12 +113,13 @@ def test_continue_discussion_does_not_duplicate_the_user_message(
 
 
 def test_summarize_discussion_returns_the_summary(isolated_client, monkeypatch):
-    async def fake_summarize(text, conversation_history, provider="ollama"):
+    # The service takes the transcript, not the selection: the selection is its
+    # first user message (P3-15).
+    async def fake_summarize(conversation_history, provider="ollama"):
         return "the whole discussion, summarised"
 
     monkeypatch.setattr(service(), "summarize_conversation", fake_summarize)
     response = isolated_client.post("/api/ai/discussion/summarize", json={
-        "selected_text": "sample text",
         "conversation_history": [{"role": "user", "content": "q"}],
         "provider": "ollama"})
     assert response.status_code == 200
@@ -131,12 +132,10 @@ def test_discussion_endpoints_map_failures_to_502(isolated_client, monkeypatch):
         "selected_text": "text", "provider": "ollama"})
     assert start.status_code == 502
     cont = isolated_client.post("/api/ai/discussion/continue", json={
-        "selected_text": "text",
         "conversation_history": [{"role": "user", "content": "q"}],
         "user_message": "q", "provider": "ollama"})
     assert cont.status_code == 502
     summ = isolated_client.post("/api/ai/discussion/summarize", json={
-        "selected_text": "text",
         "conversation_history": [{"role": "user", "content": "q"}],
         "provider": "ollama"})
     assert summ.status_code == 502
