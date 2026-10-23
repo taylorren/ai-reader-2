@@ -61,7 +61,7 @@ recipes are in Appendix A.
 | P2-5 | Medium | Concurrency | The book cache can close a book another request is using | M |
 | P2-6 | Medium | Concurrency | `get_db()` is not thread-safe ✔ applied | S |
 | P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
-| P2-8 | Medium | Reading state | Progress writes can lose to older writes | M |
+| P2-8 | Medium | Reading state | Progress writes can lose to older writes ✔ applied | M |
 | P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count ✔ applied | S |
 | P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
 | P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
@@ -848,10 +848,10 @@ pre-fix code it fails with `assert '8123' == '9000'`, which is the finding's own
 
 ---
 
-### P2-8 · Progress writes can lose to older writes
+### P2-8 · Progress writes can lose to older writes ✔ applied
 
 **Severity:** Medium · **Effort:** M · **Area:** Reading state
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/reader.js:53-62` (`load`), `:486-502` (`saveProgress`),
 `:619-655` (`restoreScroll`); server side `routers/settings.py:56-95`,
@@ -881,6 +881,38 @@ backtracking loses the position the map exists to remember. Both are silent.
 
 **Verify:** throttle the network, click next twice quickly, reload — resume is on the last
 chapter; A → B → A returns to A's position.
+
+**Applied (2026-10-23, `database.py`, `routers/settings.py`, `static/js/reader.js`, tests):** both
+halves, with one correction to the fix as written.
+
+* **Ordering.** `reading_progress` gains a `seq` column (through the existing idempotent
+  `_ensure_columns`, so an older database keeps working and its rows get 0). The upsert carries
+  `WHERE excluded.seq = 0 OR excluded.seq >= reading_progress.seq`, so a write older than the
+  stored one is ignored — and `seq = 0` means "no ordering information", which is always accepted,
+  so an unversioned client (or a row that predates the column) still saves. `ProgressUpdate.seq`
+  and `save_progress(..., seq=…)` carry it.
+* **The counter the fix suggests would have broken progress on every reload.** `seq: ++state.seq`
+  restarts at 1 after a refresh — *below* whatever the server stored — so every save after a
+  reload would be dropped as stale, and the reader's position would freeze until they scrolled 58
+  more times. `nextProgressSeq()` is `Math.max(counter + 1, Date.now())`: strictly increasing
+  within a session, and always ahead of any earlier session's stamps.
+* **The session's memory.** `load()` now writes the chapter being *left* before the index moves
+  (`lastPercentByChapter.get(BOOK.index) ?? frameScrollPercent()`), and the chapter being *entered*
+  gets `lastPercentByChapter.get(index) ?? 0` rather than an unconditional 0. That second change
+  came out of the test rather than the finding: writing 0 for the entered chapter is what erased a
+  chapter's remembered position, so A → B → A began at the top even with the outgoing write in
+  place.
+
+**Tested.** Server: a stale `seq` cannot move the reader backwards, a newer one lands, an
+unversioned write is accepted, and a row carrying 0 (an upgraded database) is outranked by any
+versioned write. Client: a chapter turn produces exactly two writes — the chapter left at its real
+percent, the chapter entered at 0, with the second's `seq` greater than the first's — and after
+A → B → A the frame is scrolled back to 50% of the chapter (the test that caught the gap above).
+Against the pre-P2-8 `reader.js` both client tests fail.
+
+**Not reproduced literally:** the Verify line's "throttle the network, click next twice quickly"
+needs a browser and a network shaper (see T1's open step). The ordering is what makes that case
+safe, and it is asserted directly instead of by timing.
 
 ---
 
@@ -1872,8 +1904,9 @@ out — use a longer timeout for the experiment.
 ~~P3-1~~ ✔ applied → ~~P3-2~~ ✔ applied. Batch 3 complete.
 
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
-P2-8 (progress ordering) → P2-10 (context-aware painting / block anchors) → P3-15 (remove the
-dead surface) → P2-5 (cache refcounts, if the 8-book limit is ever raised).
+~~P2-8 (progress ordering)~~ ✔ applied → ~~P3-15 (remove the dead surface)~~ ✔ applied →
+P2-10 (context-aware painting / block anchors) → P2-5 (cache refcounts, if the 8-book limit is
+ever raised).
 
 **Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; P3-14 and
 T1 are the two structural investments, best done together when the next feature touches

@@ -59,11 +59,17 @@ class ProgressUpdate(BaseModel):
     `anchor` is written but never read back: it is the raw material for a
     stronger anchor (P2-10, which is undecided — see REVIEW.md), so it stays
     rather than being removed as dead surface.
+
+    `seq` orders the writes from the client. Saves are fire-and-forget, so one
+    from the chapter a reader just left can land after the new chapter's, and
+    the stored position then moved backwards (REVIEW P2-8). 0 means "no ordering
+    information" and is always accepted.
     """
     book_id: str
     chapter_index: int
     scroll_percent: float = 0.0
     anchor: str | None = None
+    seq: int = 0
 
 
 
@@ -97,5 +103,6 @@ def save_progress(update: ProgressUpdate):
         scroll_percent=max(0.0, min(100.0, update.scroll_percent)),
         anchor=update.anchor,
         chapter_path=book.spine[update.chapter_index],
+        seq=update.seq,
     )
     return {"status": "success"}

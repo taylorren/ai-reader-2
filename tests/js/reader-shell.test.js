@@ -125,6 +125,47 @@ test("the arrow keys turn the chapter when the reader is inside the book", () =>
     assert.equal(JSON.parse(saved.body).chapter_index, 1);
 });
 
+test("a chapter turn records the chapter being left before the one entered", () => {
+    // Progress writes are fire-and-forget, so the save for the chapter left can
+    // arrive after the new chapter's — which moved the stored position backwards
+    // (REVIEW P2-8). The outgoing chapter is written first, with a sequence.
+    const page = shellPage();
+    page.frame().contentWindow.scrollY = 1600;      // half of the scrollable
+    page.fire("load", page.frame());
+
+    page.fire("keydown", page.frame().contentWindow, { key: "ArrowRight" });
+
+    const saves = progressSaves(page);
+    assert.equal(saves.length, 2, "one for the chapter left, one for the one entered");
+    const left = JSON.parse(saves[0].body);
+    const entered = JSON.parse(saves[1].body);
+    assert.equal(left.chapter_index, 0);
+    assert.equal(left.scroll_percent, 50);
+    assert.equal(entered.chapter_index, 1);
+    assert.equal(entered.scroll_percent, 0);
+    assert.ok(entered.seq > left.seq,
+              `the later write must outrank the earlier: ${entered.seq} vs ${left.seq}`);
+});
+
+test("coming back to a chapter restores where the reader was in it", () => {
+    // A → B → A used to start A at the top: entering B wrote 0 over A's position
+    // in the session's memory (P2-8).
+    const page = shellPage();
+    page.frame().contentWindow.scrollY = 1600;
+    page.fire("load", page.frame());
+
+    page.fire("keydown", page.frame().contentWindow, { key: "ArrowRight" });   // A → B
+    page.fire("keydown", page.frame().contentWindow, { key: "ArrowLeft" });    // B → A
+
+    const scrolled = [];
+    page.frame().contentWindow.scrollTo = (x, y) => scrolled.push(y);
+    page.frame().contentWindow.location.pathname = "/book/Fixture%20Book/OEBPS/ch1.xhtml";
+    page.fire("load", page.frame());
+
+    assert.deepEqual(scrolled, [1600], "back to the middle of chapter one");
+});
+
+
 test("the arrow keys do not walk past the ends of the book", () => {
     const page = shellPage();
     page.fire("load", page.frame());

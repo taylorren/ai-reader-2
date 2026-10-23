@@ -107,6 +107,9 @@ class Database:
             self._ensure_columns(conn, "reading_progress", {
                 "chapter_path": "TEXT",
                 "block_id": "TEXT",
+                # The client's write order (REVIEW P2-8). An existing row gets 0,
+                # which any versioned write outranks.
+                "seq": "INTEGER NOT NULL DEFAULT 0",
             })
             conn.commit()
         finally:
@@ -383,11 +386,18 @@ class Database:
 
     def save_progress(self, book_id: str, chapter_index: int,
                       scroll_percent: float = 0.0, anchor: str | None = None,
-                      chapter_path: str | None = None) -> None:
+                      chapter_path: str | None = None, seq: int = 0) -> None:
         """Save or update the reading position: chapter plus percent within it.
 
         `is_completed` is deliberately untouched — finishing a book and
         being partway through it are independent facts.
+
+        `seq` orders the writes. Progress saves are fire-and-forget, so the
+        request from the chapter a reader just left can arrive *after* the one
+        for the chapter they are in, and the stored position then moved
+        backwards a chapter (REVIEW P2-8). A write whose `seq` is older than the
+        stored one is ignored; `seq = 0` means "no ordering information" and is
+        always accepted, so an unversioned client still saves.
         """
         now = datetime.now().isoformat()
         conn = self._connect()
@@ -395,16 +405,18 @@ class Database:
             conn.execute("""
                 INSERT INTO reading_progress (book_id, chapter_index, chapter_path,
                                               scroll_percent, anchor, is_completed,
-                                              last_read_at)
-                VALUES (?, ?, ?, ?, ?, 0, ?)
+                                              last_read_at, seq)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?)
                 ON CONFLICT(book_id) DO UPDATE SET
                     chapter_index = excluded.chapter_index,
                     chapter_path = excluded.chapter_path,
                     scroll_percent = excluded.scroll_percent,
                     anchor = excluded.anchor,
-                    last_read_at = excluded.last_read_at
+                    last_read_at = excluded.last_read_at,
+                    seq = excluded.seq
+                WHERE excluded.seq = 0 OR excluded.seq >= reading_progress.seq
             """, (book_id, chapter_index, chapter_path, scroll_percent,
-                  anchor, now))
+                  anchor, now, seq))
             conn.commit()
         finally:
             conn.close()

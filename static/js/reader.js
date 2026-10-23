@@ -51,11 +51,23 @@ function load(index, anchor) {
     // keys reach those ends too (REVIEW P1-5). An anchor still proceeds: a TOC
     // entry inside the chapter on screen is a jump within it.
     if (index === BOOK.index && !anchor) return;
+    // Record where the reader was in the chapter they are leaving, *before* the
+    // index moves: `lastPercentByChapter` is what restoreScroll() consults, and
+    // the 0 written for the chapter being entered must not erase the chapter
+    // being left — that is what made A → B → A start A at the top (REVIEW P2-8).
+    saveProgress(lastPercentByChapter.has(BOOK.index)
+        ? lastPercentByChapter.get(BOOK.index)
+        : frameScrollPercent());
     BOOK.index = index;
     pendingAnchor = anchor || null;
     frame.src = fileURL(BOOK.slug, BOOK.spine[index], anchor);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
-    saveProgress(0);
+    // The chapter being entered: 0 when the session knows nothing about it, and
+    // its remembered position when it does. Returning to a chapter is a return
+    // to where the reader was — restoreScroll() is about to put them there — not
+    // a fresh start, and writing 0 unconditionally is what made A → B → A begin
+    // at the top (REVIEW P2-8).
+    saveProgress(lastPercentByChapter.get(BOOK.index) ?? 0);
     mark();
     ReaderPanel.setChapter(index);
 }
@@ -464,6 +476,19 @@ let pendingRestore = {
     percent: Number(BOOK.saved_percent || 0),
 };
 const lastPercentByChapter = new Map();
+
+/* Progress writes carry a sequence, because they are fire-and-forget: the save
+   for the chapter a reader just left can reach the server after the one for the
+   chapter they are in, and the stored position then moved *backwards* a chapter
+   (REVIEW P2-8). Strictly increasing, and comparable across sessions: a counter
+   alone would restart at 1 after a reload — *below* whatever the server has
+   stored — and every write after a refresh would be dropped as stale. */
+let progressSeq = 0;
+
+function nextProgressSeq() {
+    progressSeq = Math.max(progressSeq + 1, Date.now());
+    return progressSeq;
+}
 let scrollSaveTimer = null;
 
 function frameScrollPercent() {
@@ -487,6 +512,7 @@ function saveProgress(percent) {
             book_id: BOOK.slug,
             chapter_index: BOOK.index,
             scroll_percent: Math.round(percent),
+            seq: nextProgressSeq(),
         }),
     }).catch(() => {}); // a failed save must never disturb the reading
 }
