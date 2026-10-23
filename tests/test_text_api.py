@@ -8,8 +8,11 @@ def test_the_text_api_returns_prose_and_its_blocks(isolated_client, isolated,
     slug = upload()
     payload = isolated_client.get(f"/api/text/{slug}/0").json()
     assert payload["chapter_path"] == "OEBPS/ch1.xhtml"
-    assert "The first paragraph mentions a plate" in payload["text"]
-    assert payload["word_count"] == len(payload["text"])
+    # The chapter is not shipped twice: the blocks carry their own text, and the
+    # whole-chapter prose is opt-in (REVIEW P2-9).
+    assert "text" not in payload
+    assert "word_count" not in payload          # it was a character count
+    assert payload["char_count"] > 0
 
     block_ids = [block["id"] for block in payload["blocks"]]
     assert "c0000/b0003" in block_ids  # the paragraph with the plate
@@ -19,6 +22,13 @@ def test_the_text_api_returns_prose_and_its_blocks(isolated_client, isolated,
     # The heading carries the DOM id the book itself declares.
     heading = next(b for b in payload["blocks"] if b["id"] == "c0000/b0002")
     assert heading["dom_ids"] == ["top"]
+
+    # `?text=1` hands over the chapter as one string, for a caller that wants
+    # the prose rather than the anchors.
+    whole = isolated_client.get(f"/api/text/{slug}/0?text=1").json()
+    assert "The first paragraph mentions a plate" in whole["text"]
+    assert whole["char_count"] == len(whole["text"])
+    assert whole["blocks"] == payload["blocks"]
 
 
 def test_the_text_api_rejects_unknown_books_and_chapters(isolated_client,

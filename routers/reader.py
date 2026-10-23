@@ -254,13 +254,18 @@ def footnote_api(slug: str, chapter_index: int):
 
 
 @router.get("/api/text/{slug}/{chapter_index}")
-def chapter_text_api(slug: str, chapter_index: int):
-    """A chapter's plain text and its anchorable blocks.
+def chapter_text_api(slug: str, chapter_index: int, text: bool = False):
+    """A chapter's anchorable blocks — and, on request, its plain text.
 
-    The text is the AI's context and the word count's source; the blocks are
-    what a highlight anchors to. Only prose kinds come back — a list or table
-    is not a single selectable run in the served document, so a highlight in
-    one is located by its selected text alone.
+    The blocks are what a highlight anchors to, and they already carry the text
+    of every prose block, so shipping the whole chapter beside them sent the
+    same words twice on every chapter turn (REVIEW P2-9). `?text=1` adds the
+    prose as one string, for a caller that wants the chapter rather than its
+    blocks.
+
+    `char_count` counts characters, which is what it always did: it was named
+    `word_count`, a misnomer that invited the wrong use. A word count is
+    `estimate_book_word_count`'s job, with the rules it documents.
     """
     from . import BOOKS_DIR, book_cache, get_db
 
@@ -270,15 +275,17 @@ def chapter_text_api(slug: str, chapter_index: int):
     book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
     if not 0 <= chapter_index < book.chapter_count:
         raise HTTPException(status_code=404, detail="No such chapter")
-    text = book.chapter_text(chapter_index)
-    blocks = anchor_blocks(book.blocks(chapter_index))
-    return {
+
+    prose = book.chapter_text(chapter_index)
+    payload = {
         "slug": slug,
         "chapter_index": chapter_index,
         "chapter_path": book.spine[chapter_index],
-        "text": text,
-        "word_count": len(text),
-        "blocks": blocks,
+        "char_count": len(prose),
+        "blocks": anchor_blocks(book.blocks(chapter_index)),
     }
+    if text:
+        payload["text"] = prose
+    return payload
 
 

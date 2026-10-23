@@ -62,7 +62,7 @@ recipes are in Appendix A.
 | P2-6 | Medium | Concurrency | `get_db()` is not thread-safe ✔ applied | S |
 | P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
 | P2-8 | Medium | Reading state | Progress writes can lose to older writes | M |
-| P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count | S |
+| P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count ✔ applied | S |
 | P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
 | P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
 | P2-12 | Medium | Storage | SQLite tuning and connection boilerplate | S |
@@ -884,10 +884,10 @@ chapter; A → B → A returns to A's position.
 
 ---
 
-### P2-9 · `/api/text` ships the chapter twice and mislabels the count
+### P2-9 · `/api/text` ships the chapter twice and mislabels the count ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** API
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/reader.py:186-213`, specifically `:211`;
 `tests/test_text_api.py:15`.
@@ -905,6 +905,23 @@ into blocks) on every chapter turn, only to map the user's selection to a block 
 (update the test). If a word count is wanted, reuse `estimate_book_word_count`'s rules.
 
 **Verify:** response size halves for a big chapter; `len(blocks)` mapping unchanged.
+
+**Applied (2026-10-23, `routers/reader.py` + `tests/test_text_api.py`):** the response is the
+blocks and the count; the prose is opt-in behind `?text=1`, and `word_count` is `char_count` —
+which is what it always was. The endpoint's docstring says both, and that a word count is
+`estimate_book_word_count`'s job with the rules it documents. When the prose *is* asked for it is
+parsed once and shared with the count rather than twice.
+
+Measured on a real chapter after the change (自由的窄廊, ch. 25 — its largest, `OEBPS/quote.xhtml`,
+656 blocks, 88,426 characters): **220,449 bytes → 129,649** per chapter turn, so the prose the
+blocks already carry is no longer on the wire a second time. The saving is not exactly half because
+the blocks are JSON objects with ids and DOM ids around their text; it grows with the chapter,
+which is where the finding pointed. `len(blocks)` and the block ids are unchanged, which is what the
+panel maps a selection against.
+
+The test now asserts the absent fields as well as the present ones (`"text" not in payload`,
+`"word_count" not in payload`) and exercises `?text=1` for the caller that wants the chapter as one
+string.
 
 ---
 
@@ -1695,7 +1712,7 @@ out — use a longer timeout for the experiment.
 **Batch 2 — "the boundaries hold" (≈ one day):**
 ~~P2-1 (CSP on book files, with T5)~~ ✔ applied → ~~P2-6 (`get_db` lock)~~ ✔ applied →
 ~~P2-7 (`setdefault`)~~ ✔ applied → ~~P2-11 (`Literal` validation)~~ ✔ applied → P2-12 (WAL +
-`_session`) → ~~P2-4 (word count + test)~~ ✔ applied → P2-9 (`/api/text`).
+`_session`) → ~~P2-4 (word count + test)~~ ✔ applied → ~~P2-9 (`/api/text`)~~ ✔ applied.
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
 ~~P1-4 (textarea editing)~~ ✔ applied → ~~P1-5 (frame keydown + menu semantics)~~ ✔ applied →
