@@ -54,11 +54,12 @@ def update_settings(settings: SettingsUpdate):
 
 
 class ProgressUpdate(BaseModel):
-    """A reading position: the chapter, and how far down it the reader is.
+    """A reading position: the chapter, how far down it, and the block there.
 
-    `anchor` is written but never read back: it is the raw material for a
-    stronger anchor (P2-10, which is undecided — see REVIEW.md), so it stays
-    rather than being removed as dead surface.
+    `block_id` is the position's identity — the first block on screen when the
+    reader stopped — and it is what a resume is anchored to; `scroll_percent`
+    is the fallback, for a row written before the anchor existed and for a
+    block the served document no longer has (REVIEW P2-10).
 
     `seq` orders the writes from the client. Saves are fire-and-forget, so one
     from the chapter a reader just left can land after the new chapter's, and
@@ -68,7 +69,7 @@ class ProgressUpdate(BaseModel):
     book_id: str
     chapter_index: int
     scroll_percent: float = 0.0
-    anchor: str | None = None
+    block_id: str | None = None
     seq: int = 0
 
 
@@ -101,7 +102,7 @@ def save_progress(update: ProgressUpdate):
         update.book_id,
         update.chapter_index,
         scroll_percent=max(0.0, min(100.0, update.scroll_percent)),
-        anchor=update.anchor,
+        block_id=update.block_id,
         chapter_path=book.spine[update.chapter_index],
         seq=update.seq,
     )

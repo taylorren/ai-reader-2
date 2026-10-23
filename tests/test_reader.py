@@ -414,18 +414,76 @@ def test_progress_is_saved_and_restored(isolated_client, isolated, db):
     slug = upload(isolated_client, isolated)
     response = isolated_client.post(
         "/api/progress",
-        json={"book_id": slug, "chapter_index": 1, "scroll_percent": 42.0},
+        json={"book_id": slug, "chapter_index": 1, "scroll_percent": 42.0,
+              "block_id": "c0001/b0003"},
     )
     assert response.status_code == 200
     progress = db.get_progress(slug)
     assert progress["chapter_index"] == 1
     assert progress["scroll_percent"] == 42.0
+    # The position's identity travels with it: the resume lands on this block
+    # even if the text has reflowed since (REVIEW P2-10).
+    assert progress["block_id"] == "c0001/b0003"
 
     # The resume link and the shell both honour it.
     redirect = isolated_client.get(f"/read/{slug}", follow_redirects=False)
     assert unquote(redirect.headers["location"]) == f"/read/{slug}/1"
     body = isolated_client.get(f"/read/{slug}/1").text
     assert '"saved_percent": 42' in body or '"saved_percent":42' in body
+    assert ('"saved_block_id": "c0001/b0003"' in body
+            or '"saved_block_id":"c0001/b0003"' in body)
+
+
+def test_an_old_database_drops_the_anchor_column_and_keeps_its_rows(tmp_path):
+    """P2-10: `anchor` was a second anchor scheme — accepted by the API, written
+    to the database, read by nothing. The column goes; the row stays, and so
+    does the block id, which is the scheme that is now real."""
+    import sqlite3
+
+    from database import Database
+
+    path = tmp_path / "reader_data.db"
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE reading_progress (
+            book_id TEXT PRIMARY KEY,
+            chapter_index INTEGER NOT NULL DEFAULT 0,
+            chapter_path TEXT,
+            scroll_percent REAL DEFAULT 0,
+            anchor TEXT,
+            block_id TEXT,
+            is_completed INTEGER NOT NULL DEFAULT 0,
+            last_read_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO reading_progress (book_id, chapter_index, chapter_path,"
+        " scroll_percent, anchor, block_id, is_completed, last_read_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("Old Book", 3, "OEBPS/ch4.xhtml", 55.0, "OEBPS/ch4.xhtml#sec-2",
+         "c0003/b0011", 0, "2026-01-01T00:00:00"))
+    conn.commit()
+    conn.close()
+
+    db = Database(path)              # the constructor runs init_db()
+
+    stored = db.get_progress("Old Book")
+    assert stored["chapter_index"] == 3
+    assert stored["scroll_percent"] == 55.0
+    assert stored["block_id"] == "c0003/b0011"
+    assert "anchor" not in stored
+    # The same run added the column this build does have (P2-8's `seq`), so the
+    # ensure/drop pair is exercised together.
+    assert stored["seq"] == 0
+
+    conn = sqlite3.connect(path)
+    try:
+        columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(reading_progress)")}
+    finally:
+        conn.close()
+    assert "anchor" not in columns
+    assert "block_id" in columns
 
 
 def test_progress_rejects_a_bad_chapter_and_unknown_book(

@@ -22,7 +22,8 @@ test("the module exposes the helpers the shell relies on", () => {
     for (const name of ["escapeHtml", "normalizeText", "normalizedIndex",
                         "offsetToPoint", "textNodes", "textOffset",
                         "findTextRange", "contextAround", "findBlockForText",
-                        "blockElement", "fileURL", "clampSize", "tocKey"]) {
+                        "blockElement", "firstVisibleBlockId", "fileURL",
+                        "clampSize", "tocKey"]) {
         assert.equal(typeof core[name], "function", name);
     }
 });
@@ -195,6 +196,63 @@ test("findTextRange reports nothing when the text is not there", () => {
     assert.equal(core.findTextRange("", SENTENCE, "", ""), null);
     // Whitespace-only normalises away to nothing, so it matches nothing.
     assert.equal(core.findTextRange(REPEATED, "   ", "", ""), null);
+});
+
+test("firstVisibleBlockId picks the block at the reading line", () => {
+    // REVIEW P2-10: a reading position is stored by block as well as by
+    // percent, so it lands on the same paragraph after the text reflows.
+    const nodes = [
+        { textContent: "scrolled past",
+          getBoundingClientRect: () => ({ top: -80, bottom: -20 }) },
+        { textContent: "the reading line sits here",
+          getBoundingClientRect: () => ({ top: -10, bottom: 30 }) },
+        { textContent: "below the fold",
+          getBoundingClientRect: () => ({ top: 40, bottom: 90 }) },
+    ];
+    const doc = { querySelectorAll: () => nodes };
+    const blocks = [
+        { id: "c0/b0", text: "scrolled past" },
+        { id: "c0/b1", text: "the reading line sits here" },
+        { id: "c0/b2", text: "below the fold" },
+    ];
+    assert.equal(core.firstVisibleBlockId(blocks, doc, 0), "c0/b1");
+    // At a line further down, the same page anchors to the lower block.
+    assert.equal(core.firstVisibleBlockId(blocks, doc, 50), "c0/b2");
+});
+
+test("firstVisibleBlockId steps over a node the blocks do not know", () => {
+    // An image between two paragraphs must not cost the anchor: the search
+    // continues rather than ending on a node with no block behind it.
+    const nodes = [
+        { textContent: "", getBoundingClientRect: () => ({ top: -5, bottom: 20 }) },
+        { textContent: "the paragraph after the plate",
+          getBoundingClientRect: () => ({ top: 20, bottom: 60 }) },
+    ];
+    const doc = { querySelectorAll: () => nodes };
+    assert.equal(core.firstVisibleBlockId(
+        [{ id: "c0/b9", text: "the paragraph after the plate" }], doc, 0), "c0/b9");
+
+    // Nothing on screen belongs to a block, or there are no blocks at all: no
+    // anchor, and the caller keeps the percent.
+    assert.equal(core.firstVisibleBlockId([{ id: "x", text: "elsewhere" }], doc, 0), null);
+    assert.equal(core.firstVisibleBlockId([], doc, 0), null);
+    assert.equal(core.firstVisibleBlockId(null, doc, 0), null);
+});
+
+test("firstVisibleBlockId matches by text, whitespace aside, and keeps the first", () => {
+    const nodes = [{ textContent: "the line\n     wraps here",
+                     getBoundingClientRect: () => ({ top: -5, bottom: 20 }) }];
+    const doc = { querySelectorAll: () => nodes };
+    assert.equal(core.firstVisibleBlockId(
+        [{ id: "c1/b2", text: "the line wraps here" }], doc, 0), "c1/b2");
+
+    // Two blocks with the same text make the anchor ambiguous; the first wins,
+    // which is the same answer the extractor's ordering gave before.
+    const repeated = { querySelectorAll: () => [
+        { textContent: "same", getBoundingClientRect: () => ({ top: 0, bottom: 10 }) }] };
+    assert.equal(core.firstVisibleBlockId(
+        [{ id: "first", text: "same" }, { id: "second", text: "same" }],
+        repeated, 0), "first");
 });
 
 test("findBlockForText picks the smallest block that contains the selection", () => {

@@ -204,6 +204,34 @@ window.ReaderCore = (function () {
         return null;
     }
 
+    // The id of the block a reader can see at `line` — a y offset inside the
+    // frame's viewport — which is the block a reading position is anchored to
+    // (REVIEW P2-10). A percent moves when the text reflows, a font-size change
+    // or a window resize; a block lands on the same paragraph.
+    //
+    // Matched by text like every other block lookup here, because the served
+    // document carries no ids from the extractor. A node the blocks do not know
+    // — an image, an uncaptioned figure — is stepped over rather than ending the
+    // search, so a picture between two paragraphs cannot cost the anchor.
+    function firstVisibleBlockId(blocks, doc, line) {
+        const ids = new Map();
+        for (const block of blocks || []) {
+            const key = normalizeText(block.text);
+            if (key && !ids.has(key)) ids.set(key, block.id);
+        }
+        if (!ids.size) return null;
+        const candidates = doc.querySelectorAll(
+            "p, h1, h2, h3, h4, h5, h6, blockquote, pre, dt, dd, li, td");
+        for (const node of candidates) {
+            // `<=`: a block whose bottom edge is exactly on the line is
+            // entirely above it, and nothing of it is on screen.
+            if (node.getBoundingClientRect().bottom <= line) continue;
+            const id = ids.get(normalizeText(node.textContent));
+            if (id) return id;
+        }
+        return null;
+    }
+
     // A book-internal path and anchor → the URL the frame loads. Each path
     // segment is encoded separately so the separators survive; the anchor is
     // encoded too, because a heading's id can hold anything.
@@ -242,6 +270,7 @@ window.ReaderCore = (function () {
         contextAround,
         findBlockForText,
         blockElement,
+        firstVisibleBlockId,
         fileURL,
         clampSize,
         tocKey,

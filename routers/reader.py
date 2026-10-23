@@ -160,7 +160,8 @@ def read_redirect(slug: str):
 
 
 def shell_context(request: Request, slug: str, row: dict, book, chapter_index: int,
-                  unsupported: str | None, saved_percent: float = 0.0) -> dict:
+                  unsupported: str | None, saved_percent: float = 0.0,
+                  saved_block_id: str | None = None) -> dict:
     """The reader shell's context — for a chapter, or for a reason page.
 
     A book with no readable chapter renders the same template with
@@ -188,6 +189,9 @@ def shell_context(request: Request, slug: str, row: dict, book, chapter_index: i
             "spine": spine,
             "toc": book.toc_json(),
             "saved_percent": saved_percent,
+            # The block the reader stopped in: the resume's identity, with the
+            # percent as the fallback for a row that predates it (REVIEW P2-10).
+            "saved_block_id": saved_block_id or "",
             # ?highlight=<id> — a "在书中定位" link; the shell scrolls to it.
             "target_highlight": request.query_params.get("highlight", ""),
         },
@@ -229,14 +233,16 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
 
     progress = get_db().get_progress(slug)
     saved_percent = 0.0
+    saved_block_id = None
     if progress and progress["chapter_index"] == chapter_index:
         saved_percent = progress["scroll_percent"] or 0.0
+        saved_block_id = progress["block_id"]
 
     return templates.TemplateResponse(
         request=request,
         name="reader.html",
         context=shell_context(request, slug, row, book, chapter_index,
-                              unsupported, saved_percent),
+                              unsupported, saved_percent, saved_block_id),
     )
 
 

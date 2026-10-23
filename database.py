@@ -89,7 +89,6 @@ class Database:
                     chapter_index INTEGER NOT NULL DEFAULT 0,
                     chapter_path TEXT,
                     scroll_percent REAL DEFAULT 0,
-                    anchor TEXT,
                     block_id TEXT,
                     is_completed INTEGER NOT NULL DEFAULT 0,
                     last_read_at TEXT NOT NULL
@@ -111,6 +110,11 @@ class Database:
                 # which any versioned write outranks.
                 "seq": "INTEGER NOT NULL DEFAULT 0",
             })
+            # A column the model no longer has: `anchor` was accepted by the API
+            # and written to the database, and nothing ever read it — a second,
+            # competing anchor scheme (path + fragment) beside the block id,
+            # which is the one that is now real (REVIEW P2-10).
+            self._drop_columns(conn, "reading_progress", ("anchor",))
             conn.commit()
         finally:
             conn.close()
@@ -122,6 +126,21 @@ class Database:
         for name, declaration in columns.items():
             if name not in present:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+    @staticmethod
+    def _drop_columns(conn: sqlite3.Connection, table: str,
+                      names: tuple[str, ...]) -> None:
+        """Remove columns the model no longer has.
+
+        The counterpart of `_ensure_columns`, idempotent the same way: a column
+        that is already gone is not an error. `DROP COLUMN` needs SQLite 3.35
+        (2021) — older would fail loudly at startup rather than quietly keep a
+        column nothing writes.
+        """
+        present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name in names:
+            if name in present:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN {name}")
 
     # -- books ---------------------------------------------------------------
 
@@ -385,12 +404,18 @@ class Database:
             conn.close()
 
     def save_progress(self, book_id: str, chapter_index: int,
-                      scroll_percent: float = 0.0, anchor: str | None = None,
+                      scroll_percent: float = 0.0, block_id: str | None = None,
                       chapter_path: str | None = None, seq: int = 0) -> None:
-        """Save or update the reading position: chapter plus percent within it.
+        """Save or update the reading position: chapter, percent, and block.
 
         `is_completed` is deliberately untouched — finishing a book and
         being partway through it are independent facts.
+
+        `block_id` is the position's *identity*: the first block on screen when
+        the reader stopped. A percent moves when the text reflows — a font-size
+        change, a window resize — while a block lands on the same paragraph
+        (REVIEW P2-10). The percent stays as the fallback for a row written
+        before this existed, and for a block the served document no longer has.
 
         `seq` orders the writes. Progress saves are fire-and-forget, so the
         request from the chapter a reader just left can arrive *after* the one
@@ -404,19 +429,19 @@ class Database:
         try:
             conn.execute("""
                 INSERT INTO reading_progress (book_id, chapter_index, chapter_path,
-                                              scroll_percent, anchor, is_completed,
+                                              scroll_percent, block_id, is_completed,
                                               last_read_at, seq)
                 VALUES (?, ?, ?, ?, ?, 0, ?, ?)
                 ON CONFLICT(book_id) DO UPDATE SET
                     chapter_index = excluded.chapter_index,
                     chapter_path = excluded.chapter_path,
                     scroll_percent = excluded.scroll_percent,
-                    anchor = excluded.anchor,
+                    block_id = excluded.block_id,
                     last_read_at = excluded.last_read_at,
                     seq = excluded.seq
                 WHERE excluded.seq = 0 OR excluded.seq >= reading_progress.seq
             """, (book_id, chapter_index, chapter_path, scroll_percent,
-                  anchor, now, seq))
+                  block_id, now, seq))
             conn.commit()
         finally:
             conn.close()

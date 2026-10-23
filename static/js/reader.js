@@ -5,7 +5,8 @@
 
 // The pure helpers live in reader-core.js (loaded first), shared with
 // panel.js and unit-tested in Node — REVIEW T1.
-const { clampSize, fileURL, tocKey } = window.ReaderCore;
+const { clampSize, fileURL, tocKey, blockElement,
+        firstVisibleBlockId } = window.ReaderCore;
 
 const app = document.getElementById("reader-app");
 const frame = document.getElementById("chapter-frame");
@@ -474,6 +475,10 @@ carries it; the database is never disturbed by a failed save. */
 let pendingRestore = {
     chapter: BOOK.index,
     percent: Number(BOOK.saved_percent || 0),
+    // The stored position's identity: the block the reader stopped in. The
+    // percent is the fallback, for a row written before the anchor existed
+    // (REVIEW P2-10).
+    block_id: BOOK.saved_block_id || null,
 };
 const lastPercentByChapter = new Map();
 
@@ -505,6 +510,15 @@ function frameScrollPercent() {
 
 function saveProgress(percent) {
     lastPercentByChapter.set(BOOK.index, percent);
+    // The position's identity, measured *now*: `load()` moves the frame on as
+    // soon as this returns, so an anchor measured after an await would describe
+    // the chapter being entered rather than the one being left. Blocks not in
+    // hand yet — the first scrolls of a chapter, before the panel has fetched
+    // them — means percent only, exactly the write this made before the anchor
+    // existed (REVIEW P2-10).
+    const blocks = ReaderPanel.cachedBlocks(BOOK.index);
+    const doc = frameDocument();
+    const anchor = blocks && doc ? firstVisibleBlockId(blocks, doc, 0) : null;
     fetch("/api/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -512,6 +526,7 @@ function saveProgress(percent) {
             book_id: BOOK.slug,
             chapter_index: BOOK.index,
             scroll_percent: Math.round(percent),
+            block_id: anchor,
             seq: nextProgressSeq(),
         }),
     }).catch(() => {}); // a failed save must never disturb the reading
@@ -627,14 +642,64 @@ function placeResumeMarker() {
     }
 }
 
+/* The resume rule is drawn at "the first paragraph boundary at or below the top
+   edge", which skips a paragraph that is only partly scrolled past — a rule at
+   its top edge would be above the fold. */
+const RESUME_LINE_MIN_TOP = 2;
+
+/* Where an anchored block is put: just *above* the viewport's top edge, so the
+   block contains the reading line.
+
+   That is the invariant that keeps the anchor stable. The position is stored
+   with the block containing the line (`firstVisibleBlockId`), so a resume that
+   put the block's top *below* the line would — wherever two blocks are adjacent,
+   with no margin between them to fall into — have the next save re-derive the
+   paragraph before it, and every open of the book would walk the anchor one
+   paragraph backwards. A paragraph's margin usually hides the two pixels this
+   costs (REVIEW P2-10). */
+const RESUME_BLOCK_TOP = -2;
+
 /* The first paragraph boundary at or below the top edge: the rule sits in the
    gap above it. The paragraph the reader stopped inside is usually partly
    scrolled past, and a rule at its top edge would be above the fold. */
 function resumeAnchorBlock(doc) {
     for (const block of doc.querySelectorAll(RESUME_MARK_SELECTOR)) {
-        if (block.getBoundingClientRect().top >= 2) return block;
+        if (block.getBoundingClientRect().top >= RESUME_LINE_MIN_TOP) return block;
     }
     return doc.body.querySelector(RESUME_MARK_SELECTOR);
+}
+
+/* Scroll the anchored block to the top of the frame's viewport.
+
+   A block is an identity: it does not move when the text reflows, which is the
+   whole point of storing it (REVIEW P2-10). Matched by text, the way a
+   highlight is, because the served document carries no ids from the extractor.
+   False when the block is not in hand or not in this document — the caller then
+   falls back to the percent. */
+function scrollToBlock(blockId, chapter) {
+    const blocks = ReaderPanel.cachedBlocks(chapter);
+    const block = blocks && blocks.find((item) => item.id === blockId);
+    const doc = frameDocument();
+    if (!block || !doc) return false;
+    const element = blockElement(doc, block);
+    if (!element) return false;
+    try {
+        const win = frame.contentWindow;
+        const offset = (win.pageYOffset || 0)
+                     + element.getBoundingClientRect().top - RESUME_BLOCK_TOP;
+        win.scrollTo(0, Math.round(offset));
+        return true;
+    } catch {
+        return false;   // opaque origin: nothing to scroll
+    }
+}
+
+function frameOffset() {
+    try {
+        return frame.contentWindow.pageYOffset || 0;
+    } catch {
+        return 0;
+    }
 }
 
 function restoreScroll(chapter) {
@@ -642,23 +707,40 @@ function restoreScroll(chapter) {
     // for that passage, not for where they left off. Its delayed scroll would
     // otherwise land after the highlight's, pulling the reader away from it.
     if (BOOK.target_highlight) return;
+    // Nothing can be measured or scrolled until the *chapter* is in the frame.
+    // At boot the shell runs this before the frame has loaded, and consuming the
+    // saved position then would lose it for good: the shell's `load` event may
+    // already have fired (a fast local server, a cached chapter), so nothing
+    // would run this again. Guarded rather than assumed — the frame's URL is the
+    // only thing that says which chapter is really on screen (REVIEW P1-6's
+    // shape; found by T1's browser smoke).
+    if (frameChapterIndex() !== chapter) return;
     let percent = null;
+    let blockId = null;
     if (pendingRestore && pendingRestore.chapter === chapter) {
         percent = pendingRestore.percent;
+        blockId = pendingRestore.block_id;
         pendingRestore = null;
     } else if (lastPercentByChapter.has(chapter)) {
         percent = lastPercentByChapter.get(chapter);
     }
-    if (!(percent > 0)) return;
-    // Layout settles as images load; restore now and once more shortly.
-    const scrollToPercent = () => {
+    if (!(percent > 0) && !blockId) return;
+    // The block first: it is an identity, so it lands on the same paragraph
+    // however the text has reflowed since — a font-size change, a window
+    // resize, a different device. The percent is the fallback, for a row written
+    // before the anchor existed and for a block this document no longer has
+    // (REVIEW P2-10).
+    const scrollToSaved = () => {
+        if (blockId && scrollToBlock(blockId, chapter)) return;
+        if (!(percent > 0)) return;
         try {
             const win = frame.contentWindow;
             const max = win.document.documentElement.scrollHeight - win.innerHeight;
             if (max > 0) win.scrollTo(0, Math.round((percent / 100) * max));
         } catch { /* opaque origin */ }
     };
-    scrollToPercent();
+    // Layout settles as images load; restore now and once more shortly.
+    scrollToSaved();
     // The rule marks where the page opened — but only for the return that this
     // session resumed, and only once.
     const placed = !resumeMarkerPlaced;
@@ -666,13 +748,40 @@ function restoreScroll(chapter) {
         resumeMarkerPlaced = true;
         placeResumeMarker();
     }
-    setTimeout(() => {
-        scrollToPercent();
-        // Re-aim once the layout has settled — unless the reader has already
-        // scrolled past the badge (or clicked it away): a retired badge stays
-        // gone, so a late re-aim cannot resurrect it.
-        if (placed && !resumeMarkerRetired) placeResumeMarker();
-    }, 350);
+    // The anchor needs the chapter's blocks, which the panel fetches on this
+    // same frame load. The percent has already put the reader in the right
+    // region, so nothing waits on them; this is the re-aim, and it happens when
+    // they arrive rather than after a guessed delay.
+    if (blockId) {
+        ReaderPanel.blocksFor(chapter).then(() => {
+            const before = frameOffset();
+            scrollToSaved();
+            // The anchor moved the page, so the rule belongs where the reader is
+            // now — and this is still the restore's own scroll, not the reader
+            // moving on, so the badge must not be retired by it.
+            if (placed && !resumeMarkerRetired && frameOffset() !== before) {
+                placeResumeMarker();
+            }
+        }).catch(() => {});
+    }
+    // Re-aim while the layout settles. The frame's own stylesheet is injected
+    // after its `load` (and images arrive after that), so both targets move
+    // under the restore: a single 350 ms attempt left a percent resume at the
+    // wrong place on a cold load — the block anchor is immune, being measured
+    // against the live document rather than against a height (REVIEW P2-10).
+    //
+    // Skipped as soon as the reader has scrolled away from where the restore
+    // left them: their position is theirs, and no re-aim may pull them back.
+    let restoredAt = frameOffset();
+    for (const delay of [350, 900, 1800]) {
+        setTimeout(() => {
+            if (Math.abs(frameOffset() - restoredAt) > 2) return;
+            scrollToSaved();
+            restoredAt = frameOffset();
+            // A retired badge stays gone, so a late re-aim cannot resurrect it.
+            if (placed && !resumeMarkerRetired) placeResumeMarker();
+        }, delay);
+    }
 }
 
 let tocSyncQueued = false;
@@ -974,7 +1083,19 @@ mark();
 wireMarkers();
 wireImages();
 loadEdges();
+// The scroll listeners are wired from the frame's `load` too, so a missed event
+// meant no progress was ever saved while scrolling — the same race as the resume
+// below, and the reason T1's browser smoke was flaky before this (the wiring is
+// per-window, so this is safe either way: a frame still on about:blank gets a
+// throwaway window marked, and the chapter's own window is wired on load).
+wireFrameScroll();
 ReaderPanel.onFrameLoad();
+// The resume, for the case the `load` listener above cannot cover: a chapter
+// that finished loading before that listener was attached never fires `load`
+// again, and the saved position would then never be restored. `restoreScroll`
+// returns unless the frame really holds this chapter, so this cannot consume the
+// position early (T1's browser smoke found this as a flaky resume).
+restoreScroll(BOOK.index);
 setTimeout(wireMarkers, 300);
 setTimeout(wireImages, 300);
 // A cached chapter can finish loading before the listener above was attached,

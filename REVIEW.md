@@ -63,7 +63,7 @@ recipes are in Appendix A.
 | P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
 | P2-8 | Medium | Reading state | Progress writes can lose to older writes ✔ applied | M |
 | P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count ✔ applied | S |
-| P2-10 | Medium | Data model | Anchor data is stored that is never used ✔ applied (painting; the progress columns stay a decision) | M |
+| P2-10 | Medium | Data model | Anchor data is stored that is never used ✔ applied (painting, and the reading position's anchor) | M |
 | P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
 | P2-12 | Medium | Storage | SQLite tuning and connection boilerplate ✔ applied (tuning; the `_session` refactor left out) | S |
 | P3-1 | Low | Front-end | Panel save label leaks across modes ✔ applied | S |
@@ -963,7 +963,7 @@ string.
 
 ---
 
-### P2-10 · Anchor data is stored that is never used ✔ applied — the painting half, end to end
+### P2-10 · Anchor data is stored that is never used ✔ applied — the painting, and the position's anchor
 
 **Severity:** Medium · **Effort:** M · **Area:** Data model
 **Review:** ☐ accept ☐ defer ☐ reject
@@ -1039,10 +1039,53 @@ reloaded (the mark's previous sibling is that same text, which only holds for th
 occurrence). Each half was reverted on its own to confirm the test fails for it: pre-fix capture ⇒
 `context_before` is `''`; pre-fix painting ⇒ "the mark landed on the wrong occurrence: `''`".
 
-**The finding's other half is a decision and stays open.** Progress's `block_id`/`anchor` are never
-written (0 rows live) and were documented rather than dropped in P3-15. Writing them means
-block-anchored resume — SPEC principle 5, a feature rather than a fix — so the columns stay until
-that milestone, or until the schema is asked to stop implying a precision it does not have.
+**The finding's other half — the reading position's anchor — is applied too.** The decision the
+review left open was "write `block_id` from the first visible block, or drop the columns". Writing it
+is the choice, because a percent is a proportion of a document that reflows: the reader has a
+font-size control, a paper/book style toggle and whatever window it is given, and all three move the
+percent while a block stays put. The *other* column went the other way — `anchor` (a book-internal
+path plus fragment) was a second, competing scheme that nothing read, so it is dropped from the
+schema, and the table now carries exactly one anchor, the one that works.
+
+* **The write** (`firstVisibleBlockId` in `reader-core.js`, called from `saveProgress`): the block
+  containing the reading line — the first block whose bottom edge is below the top of the frame's
+  viewport, matched by text like every other block lookup here. Measured *synchronously*, because
+  `load()` moves the frame on as soon as the save is issued; an anchor measured after an `await`
+  would describe the chapter being entered. Blocks not yet in hand means percent only, exactly the
+  write that existed before.
+* **The read** (`restoreScroll` + `scrollToBlock`): the anchor first, the percent as the fallback —
+  for a row written before the anchor existed, and for a block the served document no longer has.
+  The anchored block is put just *above* the top edge, so it contains the reading line: that
+  invariant is what stops the anchor walking backwards a paragraph per open, since the next save
+  re-derives the block containing that same line.
+* **The migration** (`database.py`): `_drop_columns`, the counterpart of `_ensure_columns` and
+  idempotent the same way. `DROP COLUMN` needs SQLite 3.35 (2021); the interpreter here has 3.49. The
+  live database had no value in the column, and the test builds an old table with a row in it to
+  prove the row survives the drop.
+
+**Two races the browser test found, both real and both fixed.** The initial chapter's frame can
+finish loading *before* `reader.js` attaches its `load` listener — a fast local server, a cached
+chapter — and then that listener never fires:
+
+* the **resume** never ran, so the reader opened at the top of the chapter. `restoreScroll` now
+  returns unless the frame really holds this chapter (the frame's URL is the only thing that says
+  which chapter is on screen — REVIEW P1-6's shape), and the boot path calls it as well, so a missed
+  event cannot lose the position.
+* the **scroll listeners** were never attached, so scrolling saved no progress at all. They are wired
+  at boot too; the wiring is per-window, so this is safe either way.
+
+Both showed up as *flakiness* first — one browser test in four failing, with the other runs passing —
+which is the least useful way for a bug to present itself, and is why the file now gets run
+repeatedly rather than once.
+
+**Tested.** Node: four cases for `firstVisibleBlockId` (the block at the line, a node the blocks do
+not know, whitespace-insensitive matching, the ambiguous duplicate). Python: the anchor is stored and
+travels to the shell with the percent, and an old database loses `anchor` while keeping its row and
+its `block_id`. Browser: scrolling to a named paragraph stores *that* block; a stored anchor puts the
+paragraph at the top with no percent to help it; the position this resume leaves behind is the same
+block; and a row whose block is gone still lands where the percent asks. Four reverts fail the test
+that pins them: the anchor not written, the resume offset below the line, no percent fallback, and
+(before the fix) the boot restore.
 
 ---
 
@@ -1620,11 +1663,13 @@ why it was worth doing as its own pass rather than mechanically.
 * **Kept, with a docstring saying why:** `POST /api/highlight` is the only way to create a *bare*
   mark, and both AI and highlights test suites use it as their fixture builder for the "highlight
   with no analyses" state the views have to render (the panel never calls it — it saves mark and
-  content in one act through `/api/ai/save`). `ProgressUpdate.anchor` is written to the column and
-  never read back. P2-10's painting half (applied 2026-10-23) turned out not to need it — that reads
-  the *highlight* context — so what remains is P2-10's progress half, still a decision:
-  block-anchored resume (SPEC principle 5) or drop the columns. The docstring stands until then, and
-  says who may delete them.
+  content in one act through `/api/ai/save`).
+* **`ProgressUpdate.anchor` was kept here and is now gone** (P2-10, applied 2026-10-23). It was
+  written to the column and never read back, and the docstring that kept it said it was the raw
+  material for a stronger anchor. It was not: the reading position anchors to `block_id`, which the
+  reader now writes, so `anchor` — a book-internal path plus fragment — was a second scheme with no
+  reader at either end. The field, the column and the docstring are gone together; the test that
+  proves it is `test_an_old_database_drops_the_anchor_column_and_keeps_its_rows`.
 
 **Three more instances found while doing it**, none of them in the review:
 
@@ -1988,9 +2033,8 @@ out — use a longer timeout for the experiment.
 
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
 ~~P2-8 (progress ordering)~~ ✔ applied → ~~P3-15 (remove the dead surface)~~ ✔ applied →
-~~P2-10 (context-aware painting — the painting half, end to end)~~ ✔ applied →
-P2-10's progress columns (block-anchored resume, or drop them) → P2-5 (cache refcounts, if the
-8-book limit is ever raised).
+~~P2-10 (context-aware painting, and the reading position's anchor)~~ ✔ applied →
+P2-5 (cache refcounts, if the 8-book limit is ever raised).
 
 **Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; T1 landed
 (class guard, Node module tests, stub-DOM flows and the Playwright smoke), leaving P3-14 the one

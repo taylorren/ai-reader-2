@@ -284,6 +284,16 @@ window.ReaderPanel = (function () {
         hideContextMenu();
     };
 
+    // The chapter's blocks, on demand and from cache. reader.js needs both
+    // shapes for the reading position's anchor (REVIEW P2-10): `cachedBlocks`
+    // synchronously, because the position is measured the instant before the
+    // frame moves to the next chapter — an await would measure the wrong
+    // document — and `blocksFor` for the resume, which can wait for them.
+    P.blocksFor = blocksFor;
+    P.cachedBlocks = function (index) {
+        return state.blocks[index] || null;
+    };
+
     // -- chapter data --------------------------------------------------------
 
     async function blocksFor(index) {

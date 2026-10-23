@@ -552,3 +552,47 @@ def write_repeated_epub(path) -> Path:
         zf.writestr("OEBPS/content.opf", REPEATED_OPF)
         zf.writestr("OEBPS/ch1.xhtml", REPEATED_CHAPTER)
     return Path(path)
+
+
+# A chapter long enough to scroll, with paragraphs that name themselves. A
+# reading position is anchored to the block at the top of the viewport (REVIEW
+# P2-10), and proving that takes more than a screenful: the test scrolls to a
+# named paragraph and asks where the anchor landed.
+LONG_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Long Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:long-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+
+def write_long_epub(path, paragraphs: int = 40) -> Path:
+    """A book with one chapter of `paragraphs` self-naming paragraphs."""
+    body = "\n".join(
+        f'  <p id="p{i}">Paragraph {i} of the long fixture is a block of prose '
+        f'long enough to be read rather than skimmed, and it names itself so a '
+        f'test can say which one is at the top of the screen.</p>'
+        for i in range(paragraphs))
+    chapter = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+        '<head><title>Chapter One</title></head>\n'
+        '<body>\n  <h1 id="top">Chapter One</h1>\n'
+        f"{body}\n</body>\n</html>\n"
+    )
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", LONG_OPF)
+        zf.writestr("OEBPS/ch1.xhtml", chapter)
+    return Path(path)
