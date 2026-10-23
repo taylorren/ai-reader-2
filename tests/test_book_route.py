@@ -23,6 +23,62 @@ def uploaded(isolated_client, isolated):
     return isolated_client, response.json()["slug"]
 
 
+def test_a_book_file_is_safe_to_open_directly_and_to_cache(uploaded):
+    """T5: the headers that make a book file safe at this origin, and cheap to
+    re-read.
+
+    Opened directly — a bookmark, a copied link, a new tab — the URL is a
+    top-level document at the app's origin, so a script the EPUB ships would run
+    with access to /api/*; `script-src 'none'` closes that (REVIEW P2-1). And
+    every chapter turn re-requests the chapter's own CSS, fonts and images, so
+    the response carries a validator and a lifetime (REVIEW P2-3).
+    """
+    client, slug = uploaded
+    url = f"/book/{slug}/OEBPS/ch1.xhtml"
+
+    first = client.get(url)
+    assert first.status_code == 200
+    assert first.headers["content-security-policy"] == "script-src 'none'; object-src 'none'"
+    assert first.headers["x-content-type-options"] == "nosniff"
+    assert first.headers["cache-control"] == "public, max-age=3600"
+    etag = first.headers["etag"]
+    assert etag and first.content
+
+    # The second read is a 304 with no body: the browser keeps what it has.
+    second = client.get(url, headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.content == b""
+    assert second.headers["etag"] == etag
+
+    # A stale validator still gets the file, and `*` means "anything will do".
+    assert client.get(url, headers={"If-None-Match": '"stale"'}).status_code == 200
+    assert client.get(url, headers={"If-None-Match": "*"}).status_code == 304
+    # A different member of the same book is a different resource.
+    other = client.get(f"/book/{slug}/OEBPS/ch2.xhtml")
+    assert other.headers["etag"] != etag
+
+
+def test_the_validator_changes_when_the_book_does(uploaded, isolated):
+    """A re-uploaded book must not keep serving a cached chapter.
+
+    The same book again (so the upload replaces it in place), from a fresh
+    archive: the file's stamp changes with it, which is what invalidates the
+    browser's copy.
+    """
+    client, slug = uploaded
+    url = f"/book/{slug}/OEBPS/ch1.xhtml"
+    before = client.get(url).headers["etag"]
+
+    replacement = write_epub(isolated / "again.epub")
+    client.post("/upload", files={"file": ("again.epub", replacement.read_bytes(),
+                                           "application/epub+zip")})
+
+    after = client.get(url).headers["etag"]
+    assert after != before
+    # The old validator is stale now: the file is served again, not 304'd.
+    assert client.get(url, headers={"If-None-Match": before}).status_code == 200
+
+
 def test_the_cover_comes_from_the_book_itself(uploaded):
     client, slug = uploaded
     response = client.get(f"/book/{slug}/OEBPS/img/cover.jpg")

@@ -54,9 +54,9 @@ recipes are in Appendix A.
 | P1-4 | High | Front-end | Editing a note flattens it to one line ✔ applied | M |
 | P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights | M |
 | P1-6 | High | Reading state | Following an in-book link never saves progress ✔ applied | S |
-| P2-1 | High | Security | Book files are served at the app origin with no CSP | S |
+| P2-1 | High | Security | Book files are served at the app origin with no CSP ✔ applied | S |
 | P2-2 | Medium | Performance | The library page is N+1 ✔ applied | S |
-| P2-3 | Medium | Performance | No caching headers on `/book/**` | S |
+| P2-3 | Medium | Performance | No caching headers on `/book/**` ✔ applied | S |
 | P2-4 | Medium | Metadata | CJK word count double counts | S |
 | P2-5 | Medium | Concurrency | The book cache can close a book another request is using | M |
 | P2-6 | Medium | Concurrency | `get_db()` is not thread-safe | S |
@@ -85,7 +85,7 @@ recipes are in Appendix A.
 | T2 | Medium | Testing | No fixture with a URL-hostile title ✔ applied | S |
 | T3 | Medium | Testing | No tests on prompt content or save validation | S |
 | T4 | Low | Testing | No cost test for the library render ✔ applied | S |
-| T5 | Low | Testing | No test pins response headers | S |
+| T5 | Low | Testing | No test pins response headers ✔ applied | S |
 
 **Counts:** 38 items — 7 High · 14 Medium · 17 Low — plus 5 test gaps (T1–T5).
 
@@ -520,10 +520,10 @@ finding's own evidence — and against the fixed file, `1`.
 
 ## P2 — Robustness, security, performance
 
-### P2-1 · Book files are served at the app origin with no CSP
+### P2-1 · Book files are served at the app origin with no CSP ✔ applied
 
 **Severity:** High · **Effort:** S · **Area:** Security
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/reader.py:39-53` (`content_type`), `:56-68` (`book_file`).
 
@@ -558,6 +558,17 @@ A renders unchanged.
 
 **Verify:** T5; and open a chapter URL directly, with a
 `<script>alert(1)</script>` planted in the fixture — it must not execute.
+
+**Applied with P2-3 (2026-10-23, `routers/reader.py` + `tests/test_book_route.py`):** the route
+now sends `Content-Security-Policy: script-src 'none'; object-src 'none'` and
+`X-Content-Type-Options: nosniff`, exactly as the fix proposes, and T5's test asserts both on a
+chapter URL. `script-src 'none'` also blocks inline handlers; styles, images and fonts still load,
+so model A renders unchanged — the frame's sandbox already stopped the scripts, and this closes
+the direct-navigation path the sandbox cannot.
+
+**What could not be checked here:** the execution half of the Verify line needs a browser engine,
+and this environment has none (see T1). The header is pinned; "the planted script does not run" is
+the browser's job and would be the first assertion of the Playwright smoke if it is added.
 
 ---
 
@@ -610,10 +621,10 @@ and pass the joined fields into `library_card()` / `book_percent()` instead of a
 
 ---
 
-### P2-3 · No caching headers on book files
+### P2-3 · No caching headers on book files ✔ applied
 
 **Severity:** Medium · **Effort:** S · **Area:** Performance
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/reader.py:56-68`.
 
@@ -629,6 +640,15 @@ NAS/HDD and the easiest visible win after P2-2.
 cache, and a replaced file gets a new mtime, so invalidation is safe).
 
 **Verify:** second load of the same chapter returns 304 and no body.
+
+**Applied with P2-1 (2026-10-23, `routers/reader.py` + `tests/test_book_route.py`):** the response
+carries `ETag`, `Cache-Control: public, max-age=3600`, and an `If-None-Match` check that answers
+`304` with no body (`*` and a list of tags are honoured). The validator is the **EPUB file's**
+mtime plus the member path — a member has no mtime that survives a re-upload, and any change to
+the book replaces the archive — so the upload path's `book_cache.drop()` and a replaced file's new
+stamp invalidate it together. T5's test asserts the 304, that a stale validator still gets the
+file, that `*` is honoured, that two members of one book differ, and that a **re-upload changes
+the validator** so a cached chapter cannot survive it.
 
 ---
 
@@ -1426,6 +1446,11 @@ pre-P2-2 code and 1 after, which is the assertion T4 asked for.
 `X-Content-Type-Options: nosniff` on `/book/{slug}/…`, and that a second GET with
 `If-None-Match` returns 304.
 
+**Applied with P2-1 (2026-10-23):**
+`tests/test_book_route.py::test_a_book_file_is_safe_to_open_directly_and_to_cache` asserts the
+CSP, `nosniff`, the cache lifetime, the ETag and the 304-with-no-body on a chapter URL;
+`test_the_validator_changes_when_the_book_does` asserts a re-upload moves the validator.
+
 ---
 
 ## What is working well (keep doing these)
@@ -1552,12 +1577,11 @@ out — use a longer timeout for the experiment.
 ~~P1-1 (toast CSS)~~ ✔ applied → ~~P1-2 (slug quoting + sanitising, with T2)~~ ✔ applied →
 ~~P1-3 (context into prompts, with T3)~~ ✔ applied →
 ~~P1-6 (save progress on in-frame navigation)~~ ✔ applied → ~~P2-2 (library join)~~ ✔ applied →
-P2-3
-(cache headers, with T5).
+~~P2-3 (cache headers, with T5)~~ ✔ applied.
 
 **Batch 2 — "the boundaries hold" (≈ one day):**
-P2-1 (CSP on book files, with T5) → P2-6 (`get_db` lock) → P2-7 (`setdefault`) → P2-11
-(`Literal` validation) → P2-12 (WAL + `_session`) → P2-4 (word count + test) → P2-9
+~~P2-1 (CSP on book files, with T5)~~ ✔ applied → P2-6 (`get_db` lock) → P2-7 (`setdefault`) →
+P2-11 (`Literal` validation) → P2-12 (WAL + `_session`) → P2-4 (word count + test) → P2-9
 (`/api/text`).
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**

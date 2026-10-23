@@ -69,8 +69,27 @@ def content_type(media_type: str) -> str:
 
 
 @router.get("/book/{slug}/{path:path}")
-def book_file(slug: str, path: str):
-    """One of the book's own files, at its own path. Nothing is rewritten."""
+def book_file(request: Request, slug: str, path: str):
+    """One of the book's own files, at its own path. Nothing is rewritten.
+
+    Two header jobs live here.
+
+    **Safety.** Inside the reader the book is harmless — the frame is sandboxed
+    without `allow-scripts`, so nothing it ships executes. The same URL opened
+    *directly* (a bookmark, a copied link, "open in new tab", a link rendered in
+    the highlights view) is an ordinary top-level document at this origin, where
+    a script the EPUB carries would run with access to `/api/*` — able to delete
+    books and rewrite annotations. `script-src 'none'` closes that path without
+    touching the reader: styles, images and fonts still load, and the sandbox
+    already stopped the scripts (REVIEW P2-1).
+
+    **Caching.** A chapter turn re-requests that chapter's own CSS, fonts and
+    images, and a re-read of a chapter re-requests everything: without a
+    validator the browser re-downloads it all from disk every time (REVIEW
+    P2-3). The EPUB file's mtime is the validator — a re-upload replaces the
+    file, so its stamp changes, and the upload path drops the open book — and
+    `If-None-Match` answers 304 with no body.
+    """
     from . import BOOKS_DIR, book_cache, get_db
 
     row = get_db().get_book(slug)
@@ -80,7 +99,40 @@ def book_file(slug: str, path: str):
     found = book.resource(path)
     if found is None:
         raise HTTPException(status_code=404, detail="No such file in the book")
-    return Response(content=found.read(), media_type=content_type(found.media_type))
+
+    etag = _book_etag(BOOKS_DIR / row["path"], path)
+    headers = {
+        "Content-Security-Policy": "script-src 'none'; object-src 'none'",
+        "X-Content-Type-Options": "nosniff",
+        "ETag": etag,
+        "Cache-Control": "public, max-age=3600",
+    }
+    if _etag_matches(request.headers.get("if-none-match", ""), etag):
+        return Response(status_code=304, headers=headers)
+    return Response(content=found.read(), media_type=content_type(found.media_type),
+                    headers=headers)
+
+
+def _book_etag(epub_path, resource_path: str) -> str:
+    """A validator for one file inside a book.
+
+    The archive's mtime, not the member's: a member has no mtime of its own that
+    survives a re-upload, and any change to the book replaces the archive.
+    """
+    try:
+        stamp = epub_path.stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    return f'"{stamp}-{resource_path}"'
+
+
+def _etag_matches(header: str, etag: str) -> bool:
+    """`If-None-Match` — `*`, one tag, or a list of them."""
+    if not header:
+        return False
+    if header.strip() == "*":
+        return True
+    return etag in [candidate.strip() for candidate in header.split(",")]
 
 
 # -- the reader shell -----------------------------------------------------
