@@ -28,6 +28,11 @@ uvtmp/
 !.env.example
 reader_data.db
 test.db
+# SQLite's write-ahead log and shared-memory files, which the app now uses
+reader_data.db-wal
+reader_data.db-shm
+test.db-wal
+test.db-shm
 
 # Backups and exports
 backups/

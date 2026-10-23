@@ -22,8 +22,24 @@ class Database:
         self.init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        """A connection tuned for a reader, not for a batch job.
+
+        `timeout` and WAL are the two that matter. A progress save landing while
+        a highlight is being written used to be able to raise `database is
+        locked` — and the reader's client swallows that (`.catch(() => {})`), so
+        the position silently did not save (REVIEW P2-12). WAL lets a read run
+        while a write is in flight, and the timeout waits out the brief overlap
+        that remains. `synchronous=NORMAL` is WAL's usual companion: still
+        durable against a process crash, which is the failure this app can
+        actually have.
+
+        The pragmas are best-effort by design — a filesystem without shared
+        memory falls back to the rollback journal rather than failing to open.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=5)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     def init_db(self) -> None:

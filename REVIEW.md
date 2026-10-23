@@ -1004,10 +1004,10 @@ real roles still work. Against the pre-fix code the first two fail with `assert 
 
 ---
 
-### P2-12 · SQLite tuning and connection boilerplate
+### P2-12 · SQLite tuning and connection boilerplate ✔ applied (tuning; the `_session` refactor left out)
 
 **Severity:** Medium · **Effort:** S · **Area:** Storage
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `database.py:24-27` (`_connect`), the ~20 methods that repeat
 `conn = self._connect() / try / finally: conn.close()`; writes at `:362-388`.
@@ -1043,6 +1043,29 @@ def _session(self):
 then `with self._session() as conn:` in each method.
 
 **Verify:** concurrent progress + highlight writes under `ThreadPoolExecutor` do not 500.
+
+**Applied (2026-10-23, `database.py` + `.gitignore` + `tests/test_helpers.py`):** the **tuning**
+half, which is the half that fixes the finding's impact — `sqlite3.connect(..., timeout=5)`,
+`PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`, with the docstring saying what each is for
+(WAL lets a read run while a write is in flight; the timeout waits out the remaining overlap; the
+pragmas are best-effort, so a filesystem without shared memory falls back rather than failing to
+open).
+
+Tested: the pragmas are in effect on a real connection (`journal_mode` is `wal`, `synchronous` is
+NORMAL) and 40 overlapping progress/highlight writes across 8 threads complete, leaving 40
+highlights and a progress row. The test's docstring is honest about its own limit: provoking
+`database is locked` needs timing, so what is asserted is the mechanism.
+
+**One consequence handled:** WAL creates `reader_data.db-wal` / `-shm` beside the database, which
+`.gitignore` did not cover (it named `reader_data.db` exactly), so they are listed now — otherwise
+the first write after this change would leave two untracked files in the repo root.
+
+**The `_session` refactor is deliberately *not* done.** It is the second half of the fix, and it is
+purely cosmetic: the same ~150 lines of `try/finally: conn.close()` become `with self._session()`
+calls with identical behaviour. Rewriting twenty methods mechanically, at the end of a long
+autonomous pass and with no reviewer watching, trades a real (if small) risk of breaking the
+storage layer for a readability gain — the kind of change that deserves its own review. The
+boilerplate stays as it is; nothing in the app depends on it changing.
 
 ---
 
@@ -1811,8 +1834,9 @@ out — use a longer timeout for the experiment.
 
 **Batch 2 — "the boundaries hold" (≈ one day):**
 ~~P2-1 (CSP on book files, with T5)~~ ✔ applied → ~~P2-6 (`get_db` lock)~~ ✔ applied →
-~~P2-7 (`setdefault`)~~ ✔ applied → ~~P2-11 (`Literal` validation)~~ ✔ applied → P2-12 (WAL +
-`_session`) → ~~P2-4 (word count + test)~~ ✔ applied → ~~P2-9 (`/api/text`)~~ ✔ applied.
+~~P2-7 (`setdefault`)~~ ✔ applied → ~~P2-11 (`Literal` validation)~~ ✔ applied →
+~~P2-12 (WAL; the `_session` boilerplate left out)~~ ✔ applied →
+~~P2-4 (word count + test)~~ ✔ applied → ~~P2-9 (`/api/text`)~~ ✔ applied. Batch 2 complete.
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
 ~~P1-4 (textarea editing)~~ ✔ applied → ~~P1-5 (frame keydown + menu semantics)~~ ✔ applied →

@@ -65,7 +65,41 @@ def test_the_database_is_built_once_under_concurrent_first_requests(
     assert len({id(instance) for instance in seen}) == 1
 
 
-# -- slug ------------------------------------------------------------------
+def test_the_database_is_tuned_for_overlapping_writes(isolated):
+    """P2-12: a progress save landing while a highlight is written could raise
+    `database is locked`, and the reader's client swallows that
+    (`.catch(() => {})`) — so the position silently did not save.
+
+    WAL and a busy timeout are the mechanism; this pins that they are in effect
+    and that overlapping writes complete. (A test that *provokes* the lock would
+    depend on timing to do it — the pragmas are what remove the failure, and they
+    are what is asserted.)
+    """
+    import concurrent.futures
+
+    from database import Database
+
+    db = Database(isolated / "reader_data.db")
+    conn = db._connect()
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1     # NORMAL
+    finally:
+        conn.close()
+
+    def write(index):
+        db.save_progress("Fixture Book", index % 3,
+                         scroll_percent=float(index % 100))
+        return db.save_highlight("Fixture Book", index % 3, f"selection {index}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(write, range(40)))
+
+    assert len(db.highlights_for("Fixture Book")) == 40
+    assert db.get_progress("Fixture Book") is not None
+
+
+# -- the slug ------------------------------------------------------------------
 
 def test_sanitize_replaces_characters_filenames_cannot_carry():
     assert sanitize_folder_name('What "Is" Truth?') == "What _Is_ Truth_"
