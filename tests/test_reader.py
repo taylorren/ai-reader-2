@@ -226,6 +226,68 @@ def test_every_toast_class_has_a_rule_in_reader_css(isolated_client):
     assert not missing, f"toast() sets classes reader.css never styles: {missing}"
 
 
+def test_a_book_whose_file_vanished_shows_its_reason_not_a_404(
+        isolated_client, isolated):
+    """P3-5: `unsupported` was read from the database row, so a file deleted or
+    replaced behind the app's back still said "supported" — the card kept its
+    links, every chapter 404'd, and the named reason principle 7 promises was
+    nowhere. The live value wins now.
+    """
+    import routers
+
+    slug = upload(isolated_client, isolated)
+    (isolated / "books" / slug / f"{slug}.epub").unlink()
+    routers.book_cache.clear()
+
+    # The row is unchanged, so the card still links here…
+    assert isolated_client.get(f"/read/{slug}",
+                               follow_redirects=False).status_code == 307
+    # …and the page says why the book cannot be read, instead of "No such
+    # chapter" from a book with no chapters.
+    page = isolated_client.get(f"/read/{slug}/0")
+    assert page.status_code == 200
+    assert "无法打开此书" in page.text
+    assert "unreadable file" in page.text
+
+    # The API reports the same live value.
+    assert "unreadable file" in isolated_client.get(
+        f"/api/book/{slug}").json()["unsupported"]
+
+
+def test_resume_never_redirects_to_a_chapter_that_cannot_exist(
+        isolated_client, isolated):
+    """P3-6: `min(progress, chapter_count - 1)` is -1 for a book with no
+    chapters, so the library link redirected to `/read/{slug}/-1`, which 404s —
+    the one place where a named failure became a bare 404.
+    """
+    import routers
+
+    slug = upload(isolated_client, isolated)
+    # The reader was at chapter two when the file went away.
+    isolated_client.post("/api/progress", json={
+        "book_id": slug, "chapter_index": 1, "scroll_percent": 40.0})
+    (isolated / "books" / slug / f"{slug}.epub").unlink()
+    routers.book_cache.clear()
+
+    response = isolated_client.get(f"/read/{slug}", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/0"), response.headers["location"]
+    # And what it lands on is the reason page, not a 404.
+    landing = isolated_client.get(response.headers["location"])
+    assert landing.status_code == 200
+    assert "无法打开此书" in landing.text
+
+
+def test_a_supported_book_still_opens_normally(isolated_client, isolated):
+    """The live-value check must not turn a healthy book into a reason page."""
+    slug = upload(isolated_client, isolated)
+    page = isolated_client.get(f"/read/{slug}/0")
+    assert page.status_code == 200
+    assert "无法打开此书" not in page.text
+    assert 'sandbox="allow-same-origin"' in page.text
+    assert isolated_client.get(f"/api/book/{slug}").json()["unsupported"] is None
+
+
 def test_the_shell_serves_the_books_own_document(isolated_client, isolated):
     slug = upload(isolated_client, isolated)
     response = isolated_client.get(f"/read/{slug}/0")

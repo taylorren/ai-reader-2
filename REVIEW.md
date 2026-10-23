@@ -70,8 +70,8 @@ recipes are in Appendix A.
 | P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled ✔ applied | S |
 | P3-3 | Low | Export | Markdown export breaks multi-paragraph quotes | S |
 | P3-4 | Low | A11y | `<html lang="en">` on a Chinese UI | S |
-| P3-5 | Low | Robustness | Stale `unsupported`, derived from the database row | S |
-| P3-6 | Low | Routing | `read_redirect` can compute `chapter_index = -1` | S |
+| P3-5 | Low | Robustness | Stale `unsupported`, derived from the database row ✔ applied | S |
+| P3-6 | Low | Routing | `read_redirect` can compute `chapter_index = -1` ✔ applied | S |
 | P3-7 | Low | Docs | Docstrings and SPEC that contradict the code | S |
 | P3-8 | Low | Dependencies | `httpx2` is a runtime dependency for a test-only need | S |
 | P3-9 | Low | AI | AI client is created per call; one `except` is unreachable | S |
@@ -1152,10 +1152,10 @@ and hyphenation are misled. One attribute, three files.
 
 ---
 
-### P3-5 · Stale `unsupported`, derived from the database row
+### P3-5 · Stale `unsupported`, derived from the database row ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Robustness
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/reader.py:122` and `:155`; `booksource.py:54-59`.
 
@@ -1173,12 +1173,25 @@ the app's back, the row still says "supported", `Book.open` returns an unopenabl
 shell render its existing unsupported panel when `chapter_count == 0`. Keep the DB column for
 the library cards, which must not parse books.
 
+**Applied with P3-6 (2026-10-23, `routers/reader.py` + `tests/test_reader.py`):** both the shell
+and `/api/book` report `book.unsupported or row["unsupported"]`, and the shell renders its reason
+page — rather than raising `No such chapter` — when the book has no chapters at all. The template
+context moved into one `shell_context()` helper so the chapter page and the reason page cannot
+drift apart. The DB column stays for the library cards, which must not parse books, exactly as the
+fix says.
+
+Tested by deleting a book's file behind the app's back (the row still says it is fine): the card
+still links to it, and `/read/{slug}/0` answers **200 with 无法打开此书 and the `unreadable file: …`
+reason**; `/api/book/{slug}` reports the same live value; and a healthy book still opens with its
+frame and `unsupported: null`, so the live check cannot turn a good book into a reason page.
+Against the pre-fix code the first assertion is `assert 404 == 200`.
+
 ---
 
-### P3-6 · `read_redirect` can compute `chapter_index = -1`
+### P3-6 · `read_redirect` can compute `chapter_index = -1` ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Routing
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `routers/reader.py:74-86`.
 
@@ -1193,6 +1206,12 @@ place where a named failure becomes a bare 404.
 **Fix:** `index = min(max(progress_index, 0), max(book.chapter_count - 1, 0))` and let the
 shell render the unsupported panel when `chapter_count == 0` (see
 P3-5).
+
+**Applied with P3-5 (2026-10-23):** the clamp is the fix's own line, and the shell now renders its
+reason page at index 0 rather than 404ing on every index. Tested by giving a book a progress row
+and *then* deleting its file: `/read/{slug}` redirects to `…/0` — against the pre-fix code it
+reports `Location: /read/Fixture%20Book/-1`, the finding's own output — and that URL answers 200
+with the reason.
 
 ---
 

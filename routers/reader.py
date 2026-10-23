@@ -149,10 +149,49 @@ def read_redirect(slug: str):
     progress = get_db().get_progress(slug)
     if progress:
         book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
-        index = min(progress["chapter_index"], book.chapter_count - 1)
+        # Clamped at both ends: a book with an empty spine (`chapter_count == 0`,
+        # a malformed file that still opened) used to compute -1 and redirect to
+        # `/read/{slug}/-1`, which nothing accepts — the one place where a named
+        # failure became a bare 404 (REVIEW P3-6).
+        index = min(max(progress["chapter_index"], 0), max(book.chapter_count - 1, 0))
     # The slug is quoted: `#` in a Location header is read by the browser as the
     # start of a fragment, so `/read/C# in Depth/0` sent it to `/read/C`.
     return RedirectResponse(f"/read/{quote(slug, safe='')}/{index}", status_code=307)
+
+
+def shell_context(request: Request, slug: str, row: dict, book, chapter_index: int,
+                  unsupported: str | None, saved_percent: float = 0.0) -> dict:
+    """The reader shell's context — for a chapter, or for a reason page.
+
+    A book with no readable chapter renders the same template with
+    `unsupported` set and no frame, so one construction serves both and the two
+    cannot drift apart.
+    """
+    spine = list(book.spine)
+    initial_src = ""
+    if 0 <= chapter_index < len(spine):
+        initial_src = (f"/book/{quote(slug, safe='')}/"
+                       f"{quote(spine[chapter_index], safe='/')}")
+    return {
+        "slug": slug,
+        "title": row["title"] or slug,
+        "index": chapter_index,
+        "chapter_count": book.chapter_count,
+        "unsupported": unsupported,
+        "asset_version": get_asset_version(
+            "static/js/reader.js", "static/js/panel.js",
+            "static/js/reader-core.js", "static/css/reader.css"),
+        "initial_src": initial_src,
+        "book_data": {
+            "slug": slug,
+            "index": chapter_index,
+            "spine": spine,
+            "toc": book.toc_json(),
+            "saved_percent": saved_percent,
+            # ?highlight=<id> — a "在书中定位" link; the shell scrolls to it.
+            "target_highlight": request.query_params.get("highlight", ""),
+        },
+    }
 
 
 @router.get("/read/{slug}/{chapter_index}")
@@ -172,7 +211,20 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
     if row is None:
         raise HTTPException(status_code=404, detail="Book not found")
     book = book_cache.get_or_open(slug, BOOKS_DIR / row["path"])
+    # The live value wins over the stored one: a file deleted or replaced behind
+    # the app's back still has a row saying it was readable, and `unsupported` is
+    # cheap to recompute here — the book is open either way (REVIEW P3-5).
+    unsupported = book.unsupported or row["unsupported"]
+
     if not 0 <= chapter_index < book.chapter_count:
+        # No chapter to show. If the book has none at all, its named reason is
+        # what the reader needs — the library card cannot reach this page (it
+        # hides its 浏览本书 link), and a bare 404 says nothing (P3-5/P3-6).
+        if book.chapter_count == 0:
+            return templates.TemplateResponse(
+                request=request, name="reader.html",
+                context=shell_context(request, slug, row, book, 0,
+                                      unsupported or "unreadable book: no chapters"))
         raise HTTPException(status_code=404, detail="No such chapter")
 
     progress = get_db().get_progress(slug)
@@ -183,29 +235,8 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
     return templates.TemplateResponse(
         request=request,
         name="reader.html",
-        context={
-            "slug": slug,
-            "title": row["title"] or slug,
-            "index": chapter_index,
-            "chapter_count": book.chapter_count,
-            "unsupported": row["unsupported"],
-            "asset_version": get_asset_version(
-                "static/js/reader.js", "static/js/panel.js",
-                "static/js/reader-core.js", "static/css/reader.css"),
-            "initial_src": (
-                f"/book/{quote(slug, safe='')}/"
-                f"{quote(book.spine[chapter_index], safe='/')}"
-            ),
-            "book_data": {
-                "slug": slug,
-                "index": chapter_index,
-                "spine": list(book.spine),
-                "toc": book.toc_json(),
-                "saved_percent": saved_percent,
-                # ?highlight=<id> — a "在书中定位" link; the shell scrolls to it.
-                "target_highlight": request.query_params.get("highlight", ""),
-            },
-        },
+        context=shell_context(request, slug, row, book, chapter_index,
+                              unsupported, saved_percent),
     )
 
 
@@ -222,7 +253,9 @@ def book_api(slug: str):
         "slug": slug,
         "title": row["title"] or slug,
         "author": row["author"] or "",
-        "unsupported": row["unsupported"],
+        # The live reason wins: the row can be stale if the file changed behind
+        # the app's back (REVIEW P3-5).
+        "unsupported": book.unsupported or row["unsupported"],
         "chapter_count": book.chapter_count,
         "spine": list(book.spine),
         "toc": book.toc_json(),
