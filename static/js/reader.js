@@ -859,6 +859,19 @@ function wireImages() {
     }
 }
 
+// The chapter the frame is showing, from its own path — decoded, because the
+// server's `quote` escapes "(" and ")" while the spine does not (see
+// bookPrefix). -1 when the frame is not on a chapter of this book.
+function frameChapterIndex() {
+    try {
+        const pathname = decodeURIComponent(frame.contentWindow.location.pathname);
+        if (!pathname.startsWith(bookPrefix)) return -1;
+        return BOOK.spine.indexOf(pathname.slice(bookPrefix.length));
+    } catch (error) {
+        return -1;   // opaque origin: nothing to sync
+    }
+}
+
 // In-book links navigate the frame natively; follow along so the position
 // and the TOC highlight stay in step with what the reader is looking at.
 frame.addEventListener("load", () => {
@@ -866,17 +879,20 @@ frame.addEventListener("load", () => {
     hideImagePopup();
     applyFrameStyle();
     wireFrameScroll();
+    // The frame — not the shell — is the truth about which chapter is on
+    // screen: a footnote's 在注释处打开 or any cross-reference moves it without
+    // the shell asking. Decided *before* the scroll is restored, so a chapter
+    // entered by a link is not scrolled to the previous chapter's position, and
+    // recorded, so a resume lands here rather than where the link was followed
+    // from (REVIEW P1-6).
+    const moved = frameChapterIndex();
+    if (moved >= 0 && moved !== BOOK.index) {
+        BOOK.index = moved;
+        saveProgress(0);            // the frame moved the reader: record it
+        mark();
+        ReaderPanel.setChapter(moved);
+    }
     restoreScroll(BOOK.index);
-    try {
-        const pathname = decodeURIComponent(frame.contentWindow.location.pathname);
-        if (pathname.startsWith(bookPrefix)) {
-            const index = BOOK.spine.indexOf(pathname.slice(bookPrefix.length));
-            if (index >= 0 && index !== BOOK.index) {
-                BOOK.index = index;
-                mark();
-            }
-        }
-    } catch (error) { /* opaque origin: nothing to sync */ }
     // Wiring happens whatever the frame navigated to: an unrelated URL must
     // never leave the reader without footnotes or highlights.
     wireMarkers();  // word-convention markers wire immediately

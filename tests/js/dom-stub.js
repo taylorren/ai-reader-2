@@ -24,11 +24,16 @@ function makeElement(tag, registry) {
     const element = {
         tagName: String(tag || "div").toUpperCase(),
         id: "", hidden: false, value: "", textContent: "", className: "",
-        style: {}, dataset: {}, children: [], focused: false,
+        style: {}, dataset: {}, children: [], focused: false, _attributes: {},
         _innerHTML: "", _createdIds: [], _listeners: {}, _classes: new Set(),
         addEventListener(type, fn) { (this._listeners[type] ||= []).push(fn); },
         click() { for (const fn of this._listeners.click || []) fn({ target: this }); },
         appendChild(child) { this.children.push(child); return child; },
+        setAttribute(name, value) { this._attributes[name] = String(value); },
+        getAttribute(name) { return this._attributes[name]; },
+        removeAttribute(name) { delete this._attributes[name]; },
+        remove() { this.removed = true; },
+        scrollIntoView() {},
         querySelector: () => null,
         querySelectorAll: () => [],
         focus() { this.focused = true; },
@@ -63,7 +68,7 @@ function makeElement(tag, registry) {
     return element;
 }
 
-function createPage() {
+function createPage(options = {}) {
     const registry = {};
     const created = [];
     const requests = [];
@@ -118,12 +123,24 @@ function createPage() {
         marked: { parse: (markdown) => markdown },
         DOMPurify: { sanitize: (html) => html },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+        history: { replaceState() {}, pushState() {} },
+        requestAnimationFrame: () => 0,
+        cancelAnimationFrame: () => {},
+        matchMedia: () => ({ matches: false, addEventListener() {} }),
+        CSS: { escape: (value) => String(value).replace(/["\\]/g, "\\$&") },
     };
     sandbox.window = sandbox;
     vm.createContext(sandbox);
-    for (const file of ["reader-core.js", "panel.js"]) {
-        vm.runInContext(fs.readFileSync(path.join(REPO, "static", "js", file), "utf8"),
-                        sandbox, { filename: file });
+    // The shell's own order: the core module, then the panel, then reader.js.
+    // `options.files` overrides the list (absolute paths allowed), which is how
+    // a test can run a historical copy of one script against the rest.
+    const files = options.files || (options.book
+        ? ["reader-core.js", "panel.js", "reader.js"]
+        : ["reader-core.js", "panel.js"]);
+    if (options.book) sandbox.BOOK = options.book;
+    for (const file of files) {
+        const full = file.includes("/") ? file : path.join(REPO, "static", "js", file);
+        vm.runInContext(fs.readFileSync(full, "utf8"), sandbox, { filename: file });
     }
 
     return {
@@ -132,6 +149,12 @@ function createPage() {
         created,
         requests,
         menuItems,
+        frame: () => documentStub.getElementById("chapter-frame"),
+        // Fire an event on a stub element, as the browser would: the shell's
+        // frame `load` handler is how an in-book link is noticed.
+        fire(type, target) {
+            for (const fn of (target._listeners[type] || [])) fn({ target });
+        },
         // What the page is allowed to ask for; anything else throws, so a new
         // request the test does not know about is a failure, not a silent pass.
         // The most recently registered route wins, so a test can override the

@@ -53,7 +53,7 @@ recipes are in Appendix A.
 | P1-3 | Medium | AI | The AI gets the selection but never the surrounding context ✔ applied | S |
 | P1-4 | High | Front-end | Editing a note flattens it to one line ✔ applied | M |
 | P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights | M |
-| P1-6 | High | Reading state | Following an in-book link never saves progress | S |
+| P1-6 | High | Reading state | Following an in-book link never saves progress ✔ applied | S |
 | P2-1 | High | Security | Book files are served at the app origin with no CSP | S |
 | P2-2 | Medium | Performance | The library page is N+1 | S |
 | P2-3 | Medium | Performance | No caching headers on `/book/**` | S |
@@ -464,10 +464,10 @@ activates) and a non-mouse trigger such as `Ctrl/Cmd+K` on a non-empty selection
 
 ---
 
-### P1-6 · Following an in-book link never saves progress
+### P1-6 · Following an in-book link never saves progress ✔ applied
 
 **Severity:** High · **Effort:** S · **Area:** Reading state
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/reader.js:875-903` (frame `load` handler), `:53-62` (`load`).
 
@@ -494,6 +494,27 @@ if (index >= 0 && index !== BOOK.index) {
 
 **Verify:** open chapter 0, follow a cross-chapter link, close, reopen `/read/{slug}` — lands
 on the linked chapter.
+
+**Applied (2026-10-23, `static/js/reader.js` + `tests/js/reader-shell.test.js`):**
+
+* The frame's `load` handler now reads the chapter the frame landed on *first*, then records it:
+  `BOOK.index = moved; saveProgress(0); mark(); ReaderPanel.setChapter(moved)`. The path→index
+  lookup became `frameChapterIndex()`, which returns `-1` for a document that is not a chapter of
+  this book, so a link to a cover page still changes nothing.
+* **A second defect in the same three lines, fixed with it.** `restoreScroll(BOOK.index)` ran
+  *before* the index was updated, so a chapter entered by a link was scrolled to the **previous**
+  chapter's remembered position — `lastPercentByChapter` has an entry for the chapter being left,
+  not the one being entered. Deciding the chapter first fixes both; the review's fix snippet did
+  not mention this half.
+* `ReaderPanel.setChapter(moved)` is the review's, and it also hides an open context menu.
+
+**Tested** (`tests/js/reader-shell.test.js`, five cases, driving the shell's own frame `load`
+listener through the stub DOM T1 added): a link into another chapter records
+`{chapter_index: 1, scroll_percent: 0}`; the bar and the panel follow it (`2 / 2`, panel state);
+a load that stays on the chapter records **nothing** (no spurious writes on a reload); a load that
+is not a chapter is left alone; and a chapter entered by a link is not scrolled to the previous
+chapter's position. Against HEAD's `reader.js` the first case reports `progress POSTs=0` — the
+finding's own evidence — and against the fixed file, `1`.
 
 ---
 
@@ -1507,8 +1528,9 @@ out — use a longer timeout for the experiment.
 
 **Batch 1 — "the UI stops lying" (≈ half a day, all S):**
 ~~P1-1 (toast CSS)~~ ✔ applied → ~~P1-2 (slug quoting + sanitising, with T2)~~ ✔ applied →
-~~P1-3 (context into prompts, with T3)~~ ✔ applied → P1-6 (save progress on in-frame navigation) →
-P2-2 (library join) → P2-3 (cache headers, with T5).
+~~P1-3 (context into prompts, with T3)~~ ✔ applied →
+~~P1-6 (save progress on in-frame navigation)~~ ✔ applied → P2-2 (library join) → P2-3
+(cache headers, with T5).
 
 **Batch 2 — "the boundaries hold" (≈ one day):**
 P2-1 (CSP on book files, with T5) → P2-6 (`get_db` lock) → P2-7 (`setdefault`) → P2-11
