@@ -47,6 +47,8 @@ window.ReaderPanel = (function () {
         analysisId: null,
         mode: "analysis",    // analysis | discussion | comment | saved
         conversation: [],
+        summary: null,       // the discussion summary waiting to be saved
+        analysisType: null,  // what the open analysis is (fact_check | discussion)
         provider: "ollama_cloud",
         busy: false,
         saved: false,
@@ -164,9 +166,13 @@ window.ReaderPanel = (function () {
         state.conversation = [];
         state.saved = false;
         state.selection = null;
-        // The edit draft must not outlive the panel it was opened in: a stale
-        // flag would make the next 保存 update *that* analysis instead of
-        // saving a new one (P1-4).
+        // Nothing from the panel that closed may colour the next one: a stale
+        // summary would be saved as the new panel's content, and a stale type
+        // would file it under the wrong kind (REVIEW P3-1). The edit draft goes
+        // with them — a stale flag would make the next 保存 update *that*
+        // analysis instead of saving a new one (P1-4).
+        state.summary = null;
+        state.analysisType = null;
         state.editing = null;
         state.editingDraft = false;
         el("panel-selected").textContent = "";

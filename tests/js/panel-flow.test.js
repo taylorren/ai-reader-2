@@ -210,3 +210,37 @@ test("a note is stored as a comment, with the selection it marks", async () => {
     assert.equal(body.response, "第一段笔记。\n\n第二段笔记。");
     assert.equal(page.el("toast").className, "toast visible");
 });
+
+
+test("one panel's label and state do not leak into the next", async () => {
+    // A summary leaves the save button reading 保存总结 and a summary in memory;
+    // the panel that follows must not offer to save either (REVIEW P3-1).
+    const page = scriptedPage();
+    page.route(/\/api\/ai\/discussion\/start$/, {
+        response: "an overview", provider_used: "ollama", status: "success",
+        conversation_history: [{ role: "user", content: SELECTION.text },
+                               { role: "assistant", content: "an overview" }],
+    });
+    page.route(/\/api\/ai\/discussion\/summarize$/, {
+        summary: "a summary of the discussion", provider_used: "ollama",
+        status: "success",
+    });
+
+    page.menuItems.find((i) => i.dataset.action === "discussion").click();
+    await page.settle(); await page.settle();
+    page.el("panel-summarize").click();
+    await page.settle(); await page.settle();
+    assert.equal(page.el("panel-save").textContent, "保存总结");
+    assert.equal(page.P.state.summary, "a summary of the discussion");
+
+    // The reader closes the panel and selects something else — a real click
+    // arrives with a fresh selection from the frame's mouseup handler.
+    page.el("panel-close").click();
+    page.P.state.selection = { ...SELECTION };
+    page.menuItems.find((i) => i.dataset.action === "fact_check").click();
+    await page.settle(); await page.settle();
+
+    assert.equal(page.el("panel-save").textContent, "保存到数据库");
+    assert.equal(page.P.state.summary, null, "no stale summary to save");
+    assert.equal(page.P.state.analysisType, "fact_check");
+});

@@ -66,8 +66,8 @@ recipes are in Appendix A.
 | P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
 | P2-11 | Medium | API | `analysis_type` is validated on one endpoint, not the other ✔ applied | S |
 | P2-12 | Medium | Storage | SQLite tuning and connection boilerplate | S |
-| P3-1 | Low | Front-end | Panel save label leaks across modes | S |
-| P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled | S |
+| P3-1 | Low | Front-end | Panel save label leaks across modes ✔ applied | S |
+| P3-2 | Low | Front-end | The 编辑 button in the reader panel is unstyled ✔ applied | S |
 | P3-3 | Low | Export | Markdown export breaks multi-paragraph quotes | S |
 | P3-4 | Low | A11y | `<html lang="en">` on a Chinese UI | S |
 | P3-5 | Low | Robustness | Stale `unsupported`, derived from the database row | S |
@@ -1005,10 +1005,10 @@ then `with self._session() as conn:` in each method.
 
 ## P3 — Polish, correctness nits, documentation
 
-### P3-1 · Panel save label leaks across modes
+### P3-1 · Panel save label leaks across modes ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Front-end
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/panel.js:153-168` (`resetPanel`), `:410-421` (`startComment`),
 `:499-521` (`summarizeDiscussion`), `:524-573` (`saveCurrent`).
@@ -1030,12 +1030,23 @@ draft flag, and both must be reset or the leak gets worse. What remains here is 
 and `state.analysisType` (a stale summary and a stale type between panels), plus the triage
 decision. Left unticked.
 
+**Fully applied (2026-10-23, `static/js/panel.js` + `tests/js/panel-flow.test.js`):** the rest of
+the fix's line — `state.summary = null; state.analysisType = null;` in `resetPanel()`, both now
+declared fields of `state` rather than appearing on first assignment. The stale summary mattered
+more than the label: it is what `saveCurrent()` writes in discussion mode, so the next panel's
+save could have stored the *previous* discussion's summary.
+
+Pinned by `one panel's label and state do not leak into the next`: summarise a discussion (the
+button reads 保存总结, `state.summary` holds the text), close the panel, ask for 解释说明 — and the
+button is back to 保存到数据库 with no summary in memory. Against the pre-P1-4/P3-1 `panel.js` it
+fails with `actual: 'a summary of the discussion'`.
+
 ---
 
-### P3-2 · The 编辑 button in the reader panel is unstyled
+### P3-2 · The 编辑 button in the reader panel is unstyled ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Front-end
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/panel.js:806-808`, `static/css/highlights.css:127-137`.
 
@@ -1048,6 +1059,16 @@ the only unstyled control in the reader.
 
 **Fix:** add `.saved-analysis .action-link { ... }` to `reader.css` (or a `btn-link` class
 shared by both stylesheets).
+
+**Applied (2026-10-23, `static/css/reader.css` + `tests/test_reader.py`):** the first option, scoped
+to `.saved-analysis` so it cannot leak onto anything else the panel builds, mirroring
+highlights.css's rule (no background, no border, accent colour, underline on hover).
+
+**This one is now guarded by a test, which is the better half of it.** T1's class guard had exactly
+one exemption, and it was this finding: `.action-link` named by `panel.js` with no rule on the
+reader page. Fixing P3-2 emptied `UNSTYLED_CLASSES` — the guard's staleness check is what demanded
+the exemption's removal — and deleting the rule again now fails the suite with
+`['action-link']`.
 
 ---
 
@@ -1652,7 +1673,7 @@ out — use a longer timeout for the experiment.
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
 ~~P1-4 (textarea editing)~~ ✔ applied → ~~P1-5 (frame keydown + menu semantics)~~ ✔ applied →
-P3-1 → P3-2.
+~~P3-1~~ ✔ applied → ~~P3-2~~ ✔ applied. Batch 3 complete.
 
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
 P2-8 (progress ordering) → P2-10 (context-aware painting / block anchors) → P3-15 (remove the

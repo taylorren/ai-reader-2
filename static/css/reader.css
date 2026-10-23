@@ -578,6 +578,20 @@ body.dark-mode .toc-caret:hover { color: #f3ead7; }
 .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 
 .saved-analysis { border-bottom: 1px dashed var(--line); padding-bottom: 10px; margin-bottom: 10px; }
+/* The 编辑 button the panel builds for each saved analysis. It is the same
+   link-button the highlights view styles in highlights.css — a stylesheet the
+   reader page does not load — so without this rule the one control in the
+   panel rendered as a default browser button (REVIEW P3-2). */
+.saved-analysis .action-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+.saved-analysis .action-link:hover { text-decoration: underline; }
 
 .btn {
     padding: 7px 12px;

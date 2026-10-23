@@ -27,12 +27,11 @@ SCRIPT_MADE_IDS = {"comment-input"}
 # define, each with the reason. Adding one here is a decision; the guard fails
 # on a class that arrives without a reason, and on an entry that is no longer
 # needed — a stale allowlist is how a guard rots.
-UNSTYLED_CLASSES = {
-    # The reader panel's 编辑 button carries a class defined only in
-    # highlights.css, which the reader page does not load: the one unstyled
-    # control in the reader (REVIEW P3-2). Delete this entry when P3-2 lands.
-    "action-link",
-}
+#
+# Empty since P3-2 landed (the reader panel's 编辑 button is styled now). The
+# staleness check below is what emptied it: the moment `.action-link` had a rule
+# on the reader page, the guard demanded the exemption's removal.
+UNSTYLED_CLASSES: set[str] = set()
 
 
 def upload(client, isolated, builder=write_epub, name="fixture.epub"):
