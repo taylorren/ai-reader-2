@@ -23,6 +23,48 @@ from routers import (  # noqa: E402
 )
 
 
+# -- the database singleton -------------------------------------------------
+
+def test_the_database_is_built_once_under_concurrent_first_requests(
+        isolated, monkeypatch):
+    """P2-6: `if _db is None: _db = Database(...)` was a plain check, so two
+    concurrent first requests could both construct it and both run init_db() —
+    on an older database the two ALTER TABLE statements then race to
+    `duplicate column name`.
+
+    The constructor is slowed down so the race has every chance to happen: with
+    the lock exactly one build is possible, so this cannot flake *against* the
+    fix. Without it, the pre-fix code builds several.
+    """
+    import threading
+    import time
+
+    import database
+    import routers
+
+    builds = []
+    real_init = database.Database.__init__
+
+    def slow_init(self, path):
+        builds.append(path)
+        time.sleep(0.05)          # widen the window the lock has to close
+        real_init(self, path)
+
+    monkeypatch.setattr(routers, "_db", None)
+    monkeypatch.setattr(database.Database, "__init__", slow_init)
+
+    seen = []
+    threads = [threading.Thread(target=lambda: seen.append(routers.get_db()))
+               for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(builds) == 1, f"the database was built {len(builds)} times"
+    assert len({id(instance) for instance in seen}) == 1
+
+
 # -- slug ------------------------------------------------------------------
 
 def test_sanitize_replaces_characters_filenames_cannot_carry():

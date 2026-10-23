@@ -55,6 +55,41 @@ def test_epubx_dependency_resolves():
     assert hasattr(epubx, "Book")
 
 
+def test_the_environment_wins_over_the_env_file(tmp_path, monkeypatch):
+    """P2-7: `load_env()` assigned unconditionally, so a variable set for real —
+    `READER_PORT=9000 uv run server.py`, a systemd unit, a container — was
+    silently replaced by whatever `.env` said, exactly when someone was trying
+    to change it.
+    """
+    import os
+
+    import server
+
+    (tmp_path / ".env").write_text(
+        "# a comment line\n"
+        "READER_PORT=8123\n"
+        "OLLAMA_BASE_URL=http://example.test:11434/v1\n"
+        'OLLAMA_MODEL="hermes3:latest"\n'
+    )
+    monkeypatch.setattr(server, "BASE_DIR", tmp_path)
+    monkeypatch.setenv("READER_PORT", "9000")
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+
+    server.load_env()
+
+    assert os.environ["READER_PORT"] == "9000"                        # the environment wins
+    assert os.environ["OLLAMA_BASE_URL"] == "http://example.test:11434/v1"
+    assert os.environ["OLLAMA_MODEL"] == "hermes3:latest"             # quotes stripped
+
+
+def test_a_missing_env_file_is_not_fatal(tmp_path, monkeypatch):
+    import server
+
+    monkeypatch.setattr(server, "BASE_DIR", tmp_path)
+    server.load_env()          # prints a warning, raises nothing
+
+
 def test_books_dir_points_at_the_repo_books_directory():
     from routers import BASE_DIR, BOOKS_DIR
 

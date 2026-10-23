@@ -14,7 +14,14 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 def load_env():
-    """Load environment variables from .env, as ai-reader does."""
+    """Load environment variables from .env, without overriding the real ones.
+
+    `setdefault`, not assignment: `READER_PORT=9000 uv run server.py`, a systemd
+    unit or a container's environment is an instruction, and `.env` used to
+    silently replace it with whatever it said — which bites exactly when someone
+    is trying to change something (REVIEW P2-7). Surrounding quotes are stripped,
+    because a hand-written .env usually quotes its values.
+    """
     env_path = BASE_DIR / ".env"
     if not env_path.exists():
         print("⚠ No .env file — AI features will not work.")
@@ -26,7 +33,7 @@ def load_env():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
-                os.environ[key.strip()] = value.strip()
+                os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
     print(f"✓ Loaded Ollama endpoint: {os.getenv('OLLAMA_BASE_URL', 'Not set')}")
 
 

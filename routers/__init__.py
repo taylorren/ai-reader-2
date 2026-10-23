@@ -84,13 +84,25 @@ DB_PATH = Path(os.getenv("READER_DB", str(BASE_DIR / "reader_data.db")))
 _db = None
 
 
+_db_lock = threading.Lock()
+
+
 def get_db():
-    """The shared Database singleton, created on first use."""
+    """The shared Database singleton, created on first use.
+
+    Under a lock, double-checked: two concurrent first requests could otherwise
+    both construct it and both run `init_db()`, and on a database from an older
+    build the two `ALTER TABLE` statements in `_ensure_columns` then race to
+    `duplicate column name`. The common path still reads a plain global, so the
+    lock costs a request nothing (REVIEW P2-6).
+    """
     global _db
     if _db is None:
-        from database import Database
+        with _db_lock:
+            if _db is None:
+                from database import Database
 
-        _db = Database(DB_PATH)
+                _db = Database(DB_PATH)
     return _db
 
 

@@ -59,8 +59,8 @@ recipes are in Appendix A.
 | P2-3 | Medium | Performance | No caching headers on `/book/**` ✔ applied | S |
 | P2-4 | Medium | Metadata | CJK word count double counts | S |
 | P2-5 | Medium | Concurrency | The book cache can close a book another request is using | M |
-| P2-6 | Medium | Concurrency | `get_db()` is not thread-safe | S |
-| P2-7 | Medium | Config | `.env` overrides the real environment | S |
+| P2-6 | Medium | Concurrency | `get_db()` is not thread-safe ✔ applied | S |
+| P2-7 | Medium | Config | `.env` overrides the real environment ✔ applied | S |
 | P2-8 | Medium | Reading state | Progress writes can lose to older writes | M |
 | P2-9 | Medium | API | `/api/text` ships the chapter twice and mislabels the count | S |
 | P2-10 | Medium | Data model | Anchor data is stored that is never used | M |
@@ -745,6 +745,17 @@ def get_db():
 
 **Verify:** no behavioural test needed; note the lock in the docstring.
 
+**Applied (2026-10-23, `routers/__init__.py` + `tests/test_helpers.py`):** a double-checked
+`_db_lock` around the construction, with the docstring naming the failure it closes (`duplicate
+column name` from two concurrent `_ensure_columns` runs), exactly as the fix proposes.
+
+The review says no test is needed; there is one anyway, because it can be made non-flaky in the
+only direction that matters.
+`test_the_database_is_built_once_under_concurrent_first_requests` slows the constructor by 50 ms
+and hammers `get_db()` from eight threads: with the lock exactly one build is *possible*, so the
+test cannot fail spuriously — and against the pre-fix code it reports **"the database was built 8
+times"**.
+
 ---
 
 ### P2-7 · `.env` overrides the real environment
@@ -766,6 +777,14 @@ surface, so the override is likely to bite exactly when someone is trying to cha
 
 **Verify:** run with `READER_PORT=9000` and `.env` containing `READER_PORT=8123`; the server
 must bind 9000.
+
+**Applied (2026-10-23, `server.py` + `tests/test_scaffold.py`):** `os.environ.setdefault(key,
+value.strip().strip("\"'"))` — the fix's own shape, `setdefault` plus quote-stripping, so a
+hand-written `.env` with quoted values still works. Two tests:
+`test_the_environment_wins_over_the_env_file` asserts the real environment wins for `READER_PORT`
+and that `.env` still fills the gaps (and that `"hermes3:latest"` loses its quotes); against the
+pre-fix code it fails with `assert '8123' == '9000'`, which is the finding's own reproduction.
+`test_a_missing_env_file_is_not_fatal` keeps the no-`.env` path covered.
 
 ---
 
@@ -1580,9 +1599,9 @@ out — use a longer timeout for the experiment.
 ~~P2-3 (cache headers, with T5)~~ ✔ applied.
 
 **Batch 2 — "the boundaries hold" (≈ one day):**
-~~P2-1 (CSP on book files, with T5)~~ ✔ applied → P2-6 (`get_db` lock) → P2-7 (`setdefault`) →
-P2-11 (`Literal` validation) → P2-12 (WAL + `_session`) → P2-4 (word count + test) → P2-9
-(`/api/text`).
+~~P2-1 (CSP on book files, with T5)~~ ✔ applied → ~~P2-6 (`get_db` lock)~~ ✔ applied →
+~~P2-7 (`setdefault`)~~ ✔ applied → P2-11 (`Literal` validation) → P2-12 (WAL + `_session`) →
+P2-4 (word count + test) → P2-9 (`/api/text`).
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
 ~~P1-4 (textarea editing)~~ ✔ applied → P1-5 (frame keydown + menu semantics) → P3-1 → P3-2.
