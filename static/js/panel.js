@@ -231,6 +231,15 @@ window.ReaderPanel = (function () {
                 hideContextMenu();
                 handleAction(item.dataset.action);
             });
+            // The items are focusable (role="menuitem", tabindex="0"), so a
+            // reader who has never touched a mouse can still reach the actions:
+            // Enter or Space does what a click does (REVIEW P1-5).
+            item.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                hideContextMenu();
+                handleAction(item.dataset.action);
+            });
         }
         document.addEventListener("click", (event) => {
             if (!event.target.closest("#context-menu")) hideContextMenu();
@@ -320,6 +329,41 @@ window.ReaderPanel = (function () {
         const height = menu.offsetHeight || 180;
         menu.style.left = Math.max(8, Math.min(x, window.innerWidth - width - 8)) + "px";
         menu.style.top = Math.max(8, Math.min(y, window.innerHeight - height - 8)) + "px";
+        // Focus the first item, so the menu can be driven from the keyboard —
+        // Tab reaches the rest. Focus moves without a click, so the frame keeps
+        // the selection the menu is about (REVIEW P1-5).
+        const first = menu.querySelector(".context-menu-item");
+        if (first && first.focus) first.focus();
+    }
+
+    // The selection, resolved to a block when the lookup answers. It is an
+    // enrichment: a refused /api/text must not take the menu down with it, since
+    // the menu is about the text the reader selected and only *saving* a
+    // highlight wants a block id.
+    async function selectionOrNull() {
+        try {
+            return await computeSelection();
+        } catch (error) {
+            console.warn("ai-reader: could not resolve the selection's block", error);
+            const found = selectionInFrame();
+            return found ? { text: found.text, block_id: null,
+                             context_before: "", context_after: "" } : null;
+        }
+    }
+
+    // The menu over the selection, for a trigger that has no pointer
+    // coordinates to give it: the selection's own box decides where it opens.
+    function openMenuOverSelection() {
+        const found = selectionInFrame();
+        const frameRect = frameEl().getBoundingClientRect();
+        let x = frameRect.left + 24;
+        let y = frameRect.top + 64;
+        if (found && found.range) {
+            const box = found.range.getBoundingClientRect();
+            x = frameRect.left + box.left;
+            y = frameRect.top + box.bottom + 12;
+        }
+        showContextMenu(x, y);
     }
 
     function hideContextMenu() {
@@ -345,24 +389,24 @@ window.ReaderPanel = (function () {
             requestClose(true);
         });
         doc.addEventListener("mouseup", async (event) => {
-            let selection;
-            try {
-                selection = await computeSelection();
-            } catch (error) {
-                // The block lookup is an enrichment — the menu is about the
-                // text the reader selected, and only saving a highlight wants
-                // a block id. So a refused /api/text must not take the menu
-                // down with it; degrade the way computeSelection does when it
-                // cannot identify the block at all.
-                console.warn("ai-reader: could not resolve the selection's block", error);
-                const found = selectionInFrame();
-                selection = found ? { text: found.text, block_id: null,
-                                      context_before: "", context_after: "" } : null;
-            }
+            const selection = await selectionOrNull();
             if (!selection) { hideContextMenu(); return; }
             state.selection = selection;
             const frameRect = frameEl().getBoundingClientRect();
             showContextMenu(frameRect.left + event.clientX, frameRect.top + event.clientY + 12);
+        });
+        // A selection made with the keyboard — Shift+arrows — has no mouseup, so
+        // the menu needs a trigger that does not need a pointer. Ctrl/Cmd+K
+        // (the reader's own habit, and the reference's) opens it over the
+        // selection (REVIEW P1-5).
+        doc.addEventListener("keydown", async (event) => {
+            if (event.key !== "k" && event.key !== "K") return;
+            if (!event.ctrlKey && !event.metaKey) return;
+            const selection = await selectionOrNull();
+            if (!selection) return;
+            event.preventDefault();
+            state.selection = selection;
+            openMenuOverSelection();
         });
     };
 

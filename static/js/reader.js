@@ -45,6 +45,12 @@ let pendingAnchor = null;
 
 function load(index, anchor) {
     index = Math.max(0, Math.min(BOOK.spine.length - 1, index));
+    // Already here, with no heading asked for: re-loading the frame would flash
+    // the chapter and write a progress row for a move that never happened. The
+    // nav buttons are disabled at the ends for the same reason — and the arrow
+    // keys reach those ends too (REVIEW P1-5). An anchor still proceeds: a TOC
+    // entry inside the chapter on screen is a jump within it.
+    if (index === BOOK.index && !anchor) return;
     BOOK.index = index;
     pendingAnchor = anchor || null;
     frame.src = fileURL(BOOK.slug, BOOK.spine[index], anchor);
@@ -670,6 +676,24 @@ function wireFrameScroll() {
         // away retires it (debounced, so it stays put while the reader is still
         // moving), and it never lingers over text the reader has left.
         win.addEventListener("scroll", retireResumeMarkerOnScroll, { passive: true });
+        // A frame is its own event tree, so the shell's keydown listener above
+        // never sees a key pressed inside the book — and clicking into the book
+        // is exactly what a reader does before selecting text. Without this the
+        // arrow keys and ESC stopped working at the first click (REVIEW P1-5).
+        win.addEventListener("keydown", (event) => {
+            const target = event.target;
+            if (target && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
+                           || target.isContentEditable)) {
+                return;      // a book with a form keeps its own keys
+            }
+            if (!imagePopup.hidden) {
+                if (event.key === "Escape") hideImagePopup();
+                return;      // a popped-out image is modal
+            }
+            if (event.key === "Escape") hidePopup();
+            if (event.key === "ArrowLeft") load(BOOK.index - 1);
+            if (event.key === "ArrowRight") load(BOOK.index + 1);
+        });
     } catch { /* opaque origin */ }
 }
 

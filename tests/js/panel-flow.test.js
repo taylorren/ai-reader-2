@@ -115,6 +115,82 @@ test("a failed save keeps the panel open and says so", async () => {
     assert.equal(page.el("panel-delete").textContent, "取消");
 });
 
+// The frame with a text selection in it, wired the way the shell wires it. The
+// keyboard path to the menu starts from a selection made with Shift+arrows,
+// which never fires a mouseup (REVIEW P1-5).
+async function selectionPage() {
+    const page = scriptedPage();
+    const range = {
+        startContainer: { nodeType: 1, parentNode: null },
+        getBoundingClientRect: () => ({ left: 12, top: 4, bottom: 20 }),
+    };
+    page.frame().contentDocument = {
+        _listeners: {},
+        addEventListener(type, fn) { (this._listeners[type] ||= []).push(fn); },
+    };
+    page.frame().contentWindow = {
+        getSelection: () => ({ toString: () => SELECTION.text, getRangeAt: () => range }),
+    };
+    await page.P.onFrameLoad();      // wires the frame's mouseup and keydown
+    return page;
+}
+
+test("a menu item answers Enter, so the actions need no mouse", async () => {
+    const page = scriptedPage();
+    page.el("context-menu").hidden = false;
+    const item = page.menuItems.find((i) => i.dataset.action === "fact_check");
+
+    page.fire("keydown", item, { key: "Enter" });
+    await page.settle(); await page.settle();
+
+    assert.equal(page.el("context-menu").hidden, true, "the menu closes");
+    const request = page.lastRequest(/\/api\/ai\/analyze$/);
+    assert.ok(request, "the analysis was requested");
+    assert.equal(page.body(request).selected_text, SELECTION.text);
+});
+
+test("Space activates a menu item too", async () => {
+    const page = scriptedPage();
+    page.el("context-menu").hidden = false;
+    const item = page.menuItems.find((i) => i.dataset.action === "copy");
+
+    page.fire("keydown", item, { key: " " });
+    await page.settle();
+
+    assert.equal(page.el("context-menu").hidden, true);
+    assert.equal(page.el("toast").textContent, "已复制到剪贴板");
+});
+
+test("Ctrl+K opens the menu over a selection made with the keyboard", async () => {
+    const page = await selectionPage();
+    assert.equal(page.el("context-menu").hidden, true, "closed to begin with");
+
+    page.fire("keydown", page.frame().contentDocument, { key: "k", ctrlKey: true });
+    await page.settle();
+
+    assert.equal(page.el("context-menu").hidden, false, "the menu opened");
+    assert.equal(page.P.state.selection.text, SELECTION.text);
+
+    // …and the item it focused does the action.
+    const item = page.menuItems.find((i) => i.dataset.action === "comment");
+    page.fire("keydown", item, { key: "Enter" });
+    await page.settle();
+
+    assert.equal(page.el("panel-save").textContent, "保存笔记");
+    assert.equal(page.el("comment-input").focused, true, "the note box takes the caret");
+});
+
+test("Ctrl+K with nothing selected opens nothing", async () => {
+    const page = await selectionPage();
+    page.frame().contentWindow.getSelection = () => ({ toString: () => "   " });
+
+    page.fire("keydown", page.frame().contentDocument, { key: "k", ctrlKey: true });
+    await page.settle();
+
+    assert.equal(page.el("context-menu").hidden, true);
+});
+
+
 test("a note is stored as a comment, with the selection it marks", async () => {
     const page = scriptedPage();
     page.menuItems.find((i) => i.dataset.action === "comment").click();

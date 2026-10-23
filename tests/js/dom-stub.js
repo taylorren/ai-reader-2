@@ -151,9 +151,16 @@ function createPage(options = {}) {
         menuItems,
         frame: () => documentStub.getElementById("chapter-frame"),
         // Fire an event on a stub element, as the browser would: the shell's
-        // frame `load` handler is how an in-book link is noticed.
-        fire(type, target) {
-            for (const fn of (target._listeners[type] || [])) fn({ target });
+        // frame `load` handler is how an in-book link is noticed, and its
+        // keydown handlers are how a reader navigates without a mouse.
+        fire(type, target, event = {}) {
+            const payload = {
+                target,
+                preventDefault() {},
+                stopPropagation() {},
+                ...event,
+            };
+            for (const fn of (target._listeners[type] || [])) fn(payload);
         },
         // What the page is allowed to ask for; anything else throws, so a new
         // request the test does not know about is a failure, not a silent pass.

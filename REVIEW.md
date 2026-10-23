@@ -52,7 +52,7 @@ recipes are in Appendix A.
 | P1-2 | High | Routing / slugs | Titles containing `#` (or `%`) break every link to the book ✔ applied | S |
 | P1-3 | Medium | AI | The AI gets the selection but never the surrounding context ✔ applied | S |
 | P1-4 | High | Front-end | Editing a note flattens it to one line ✔ applied | M |
-| P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights | M |
+| P1-5 | High | A11y | Keyboard readers lose chapter nav and cannot create highlights ✔ applied | M |
 | P1-6 | High | Reading state | Following an in-book link never saves progress ✔ applied | S |
 | P2-1 | High | Security | Book files are served at the app origin with no CSP ✔ applied | S |
 | P2-2 | Medium | Performance | The library page is N+1 ✔ applied | S |
@@ -426,10 +426,10 @@ PUT /api/ai/update/7 {"response":"第一段：这一段的结尾在这里。 - �
 
 ---
 
-### P1-5 · Keyboard readers lose chapter navigation and cannot create highlights
+### P1-5 · Keyboard readers lose chapter navigation and cannot create highlights ✔ applied
 
 **Severity:** High · **Effort:** M · **Area:** Accessibility
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `static/js/reader.js:271-282` (keydown), `static/js/panel.js:326-350` (selection),
 `templates/reader.html:76-82` (menu markup).
@@ -461,6 +461,40 @@ plus menu semantics (`role="menu"` / `role="menuitem"` / `tabindex="0"`, Enter/S
 activates) and a non-mouse trigger such as `Ctrl/Cmd+K` on a non-empty selection.
 
 **Verify:** click into a chapter, press →, chapter advances; Tab/Enter reaches the menu items.
+
+**Applied (2026-10-23, `static/js/reader.js` + `static/js/panel.js` + `templates/reader.html`
++ `tests/js/`):**
+
+* **The frame gets its own key handler.** `wireFrameScroll()` (already called on every frame load,
+  already guarded per window) now wires `keydown` on the frame's window: arrows turn the chapter,
+  ESC closes the footnote popup and the image overlay, and a popped-out image stays modal. It
+  ignores keys aimed at a book's own `INPUT`/`TEXTAREA`/`SELECT`/contenteditable, so a book with a
+  form keeps its keys. This is the finding's own snippet, plus the modal and form rules the
+  shell-side handler already had.
+* **The menu is reachable without a pointer.** The items carry `role="menuitem"`, `tabindex="0"`
+  and an `aria-label` on the `role="menu"` container; `Enter` and `Space` do what a click does;
+  and `showContextMenu()` focuses the first item (focus moves without a click, so the frame keeps
+  the selection the menu is about).
+* **Ctrl/Cmd+K opens the menu over a selection made with the keyboard**, which is the case that
+  had *no* path at all: Shift+arrows never fires `mouseup`. The menu is placed under the
+  selection's own box rather than at pointer coordinates. The mouseup handler's selection
+  resolution moved into `selectionOrNull()` so both triggers share it.
+* **One adjacent defect fell out of the tests.** `load()` re-loaded the frame even when the index
+  did not change, so ArrowLeft on the first chapter flashed the chapter and wrote a progress row
+  for a move that never happened — the nav buttons are `disabled` at the ends for exactly this
+  reason, and the keyboard reached past that. `load()` now returns early when the index is
+  unchanged *and* no anchor was asked for (a TOC entry inside the current chapter still jumps).
+
+**Tested** — ten cases in `tests/js/reader-shell.test.js` and four in `tests/js/panel-flow.test.js`,
+driving the shell's and the panel's own listeners through the stub DOM: the arrows turn the
+chapter from inside the book (and record it), the ends are respected, ESC closes the image popup
+from inside the book, a popped-out image stays modal, a book's form keeps its keys, `Enter` and
+`Space` activate a menu item, Ctrl/Cmd+K opens the menu over a keyboard selection and its focused
+item does the action, and Ctrl/Cmd+K with nothing selected opens nothing. Against the pre-P1-5
+scripts exactly those five keyboard cases fail; with the fix, 31 of 31 front-end cases pass.
+
+**Not verified here:** a real screen reader and real focus order need a browser engine (T1's open
+step). The semantics are in the markup and the handlers, and the guards cover the wiring.
 
 ---
 
@@ -1617,7 +1651,8 @@ out — use a longer timeout for the experiment.
 `_session`) → P2-4 (word count + test) → P2-9 (`/api/text`).
 
 **Batch 3 — "the reader is editable and keyboard-complete" (≈ one day, M each):**
-~~P1-4 (textarea editing)~~ ✔ applied → P1-5 (frame keydown + menu semantics) → P3-1 → P3-2.
+~~P1-4 (textarea editing)~~ ✔ applied → ~~P1-5 (frame keydown + menu semantics)~~ ✔ applied →
+P3-1 → P3-2.
 
 **Batch 4 — "the data model stops pretending" (deferred, needs a decision):**
 P2-8 (progress ordering) → P2-10 (context-aware painting / block anchors) → P3-15 (remove the
