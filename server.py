@@ -1,7 +1,9 @@
 """FastAPI server for ai-reader-2.
 
-Scaffold: the app assembles and every router is registered. The routers are
-empty until their phase lands — see SPEC.md for what each one will own.
+The app assembles here: the library, reader, highlights, AI and settings routers
+are all registered and live. `load_env()` reads `.env` before the app is built —
+without overriding a variable that is already set, so an environment set for real
+wins (see `load_env`).
 """
 
 import os

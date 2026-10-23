@@ -58,7 +58,8 @@ the client-side link-modal fetch-and-graft.
 delete) · reader (TOC, prev/next, keyboard) · the book's own files served at
 their own paths · footnotes and internal links · highlights · AI panel (local
 and cloud Ollama, interactive discussion, summarise) · progress · highlights
-view and Markdown export · settings · Docker and systemd packaging.
+view and Markdown export · settings. **Not started: Docker and systemd
+packaging** — P5, below.
 
 **Out (deferred, but named):** full-text search inside a book (epubx's
 `plain_text` makes this cheap later) · multi-user and auth · annotation sync ·
@@ -235,7 +236,7 @@ adapter is right, replacing epubx later touches one module.
 | **P2** | Rendering, TOC, prev/next | A real book renders from its own files — no image rewriting, no `spine_map`, no `DOMParser` grafting |
 | **P3** | Footnotes from edges | A footnote opens without fetching a rendered page |
 | **P4** | Highlights, AI, progress on the new DOM | Create/edit/delete a highlight, run an analysis, resume position — all survive restart |
-| **P5** | Delete the old world; docs, Docker, systemd | Zero `book.pkl` anywhere; no ebooklib or bs4 in `pyproject.toml` |
+| **P5** | Delete the old world; docs, Docker, systemd — **not started** | Zero `book.pkl` anywhere; no ebooklib or bs4 in `pyproject.toml` |
 
 Each phase is independently shippable and verifiable.
 
@@ -290,11 +291,23 @@ Each phase is independently shippable and verifiable.
 
 ## Honest coverage statement
 
-The rendering model is **undecided** (A/B/C above); the spec is written so that
-only `reader.html` and `reader.js` change when it is settled. MathJax under a
-script-less sandbox is a **known unresolved trade-off**, not a solved one. Dark
-mode versus a book's own CSS is likewise open. Search inside a book is deferred
-despite being cheap — named rather than implied.
+**The rendering model is settled: A.** The shell serves the book's own document
+in a sandboxed iframe and rewrites nothing (P2) — that is what makes footnotes,
+images and typography work without a rewriting layer, and it is why every claim
+above is measured against real books rather than fixtures alone. Two
+consequences of that choice remain **open trade-offs**, named rather than
+solved:
+
+* **MathJax** cannot run inside a script-less sandbox, so a book that ships it
+  renders its raw source. Reaching it means either executing scripts from the
+  book — which the sandbox exists to prevent — or rewriting the chapter, which
+  is the thing model A was chosen over.
+* **Dark mode is the shell's, not the book's.** A book whose own CSS sets
+  colours keeps them, so the two can disagree on a dark background. Paper mode
+  exists for that reason; 书本 mode is the publisher's design, untouched.
+
+Search inside a book is deferred despite being cheap — named rather than
+implied.
 
 ---
 

@@ -72,8 +72,8 @@ recipes are in Appendix A.
 | P3-4 | Low | A11y | `<html lang="en">` on a Chinese UI ✔ applied | S |
 | P3-5 | Low | Robustness | Stale `unsupported`, derived from the database row ✔ applied | S |
 | P3-6 | Low | Routing | `read_redirect` can compute `chapter_index = -1` ✔ applied | S |
-| P3-7 | Low | Docs | Docstrings and SPEC that contradict the code | S |
-| P3-8 | Low | Dependencies | `httpx2` is a runtime dependency for a test-only need | S |
+| P3-7 | Low | Docs | Docstrings and SPEC that contradict the code ✔ applied | S |
+| P3-8 | Low | Dependencies | `httpx2` is a runtime dependency for a test-only need ✔ applied | S |
 | P3-9 | Low | AI | AI client is created per call; one `except` is unreachable | S |
 | P3-10 | Low | Operations | No upload size cap and no staging-directory sweep | S |
 | P3-11 | Low | UX | The unsupported reason is only a tooltip ✔ applied | S |
@@ -1227,10 +1227,10 @@ with the reason.
 
 ---
 
-### P3-7 · Docstrings and SPEC that contradict the code
+### P3-7 · Docstrings and SPEC that contradict the code ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Documentation
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where/Evidence:**
 
@@ -1250,12 +1250,27 @@ the "undecided rendering" paragraph with the model-A decision and its trade-offs
 under a script-less sandbox, dark mode vs the book's CSS) — those trade-offs are still open and
 worth keeping.
 
+**Applied (2026-10-23, `server.py`, `routers/highlights.py`, `SPEC.md`):** all four claims, in
+the shape the fix asks for.
+
+* `server.py`'s header now describes the app it starts (every router live, and what `load_env`
+  does about the environment) instead of a scaffold with empty routers.
+* `store_highlight`'s docstring no longer claims a highlight is never stored on its own — which
+  `POST /api/highlight`, twenty lines below it, does exactly. It says what is true: the *panel*
+  only reaches it with content, so an unsaved explanation leaves no mark, while the row itself can
+  stand alone.
+* SPEC's "Honest coverage statement" now records the model-A decision and keeps the two open
+  trade-offs it named (MathJax under a script-less sandbox; dark mode versus the book's own CSS),
+  with the reason each is open rather than solved.
+* SPEC's scope marks Docker and systemd packaging **not started** (P5), and the milestone table
+  says so in the P5 row — matching the README, which already told the reader packaging comes next.
+
 ---
 
-### P3-8 · `httpx2` is a runtime dependency for a test-only need
+### P3-8 · `httpx2` is a runtime dependency for a test-only need ✔ applied
 
 **Severity:** Low · **Effort:** S · **Area:** Dependencies
-**Review:** ☐ accept ☐ defer ☐ reject
+**Review:** ☑ accept ☐ defer ☐ reject
 
 **Where:** `pyproject.toml:13`.
 
@@ -1269,6 +1284,12 @@ overstates the runtime surface.
 
 **Fix:** move `"httpx2>=2.0"` into `[dependency-groups].dev` next to `pytest` and keep
 `httpx` in the runtime list. `uv sync` still installs both for development and CI.
+
+**Applied (2026-10-23, `pyproject.toml` + `uv.lock`):** exactly that, with the reason in a comment
+beside it (Starlette's TestClient prefers httpx2; the app imports httpx). `uv lock --offline`
+regenerated the lock — httpx2 moves from the project's `dependencies` to `dev` — and
+`uv sync --dry-run` reports **"Would make no changes"**, so the installed environment and CI are
+unaffected. The runtime list now names only what the app imports.
 
 ---
 

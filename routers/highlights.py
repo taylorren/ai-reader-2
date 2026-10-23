@@ -98,8 +98,13 @@ def store_highlight(book_id: str, chapter_index: int, selected_text: str,
 
     The one place a highlight row is written: the highlight route and saving
     an analysis both come through here, so the reader's mark is created the
-    same way whichever endpoint carries it. A highlight is never stored on
-    its own — it is the mark a saved analysis hangs on.
+    same way whichever endpoint carries it.
+
+    The *panel* only reaches it with content — the mark is created in the same
+    act as the analysis it hangs on, so an explanation the reader never saves
+    leaves nothing behind — but the row itself can stand alone, and
+    `POST /api/highlight` stores exactly that. (The docstring here used to claim
+    otherwise, which contradicted the route below it — REVIEW P3-7.)
     """
     book = _require_chapter(book_id, chapter_index)
     selected = (selected_text or "").strip()
