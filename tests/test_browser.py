@@ -40,6 +40,7 @@ sync_api = pytest.importorskip(
 import httpx  # noqa: E402
 
 from fixtures import (  # noqa: E402
+    write_epub,
     write_long_epub,
     write_repeated_epub,
     write_scripted_epub,
@@ -164,6 +165,15 @@ def save_progress(base_url, slug, **fields):
     payload.update(fields)
     with httpx.Client(base_url=base_url, timeout=30) as client:
         response = client.post("/api/progress", json=payload)
+    assert response.status_code == 200, response.text
+
+
+def save_analysis(base_url, slug, kind, index=0, text="a saved line of the book"):
+    """A stored mark with one analysis of `kind` — no AI involved."""
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.post("/api/ai/save", json={
+            "analysis_type": kind, "response": f"the {kind} body",
+            "book_id": slug, "chapter_index": index, "selected_text": text})
     assert response.status_code == 200, response.text
 
 
@@ -397,6 +407,86 @@ def test_a_stored_block_anchor_is_where_the_reader_returns(browser, base_url, is
             assert landed, "the percent fallback did not land where the percent asked"
         finally:
             context.close()
+    finally:
+        page.close()
+
+
+def test_deleting_the_last_book_of_a_letter_takes_its_pill(browser, base_url, isolated):
+    """P3-12: the letter index kept a pill for a group whose last book was gone,
+    and clicking it filtered the shelf to nothing.
+
+    The two Vue pages are the one surface a stub DOM cannot honestly stand in
+    for — they render through Vue itself — so they are covered here, where a
+    real browser is already available.
+    """
+    upload_book(base_url, write_epub(isolated / "alpha.epub", title="Alpha Book"))
+    slug = upload_book(base_url, write_epub(isolated / "beta.epub", title="Beta Book"))
+
+    page = browser.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())     # the delete confirms
+    try:
+        page.goto(f"{base_url}/")
+        assert page.locator(".library-index-link").count() == 3   # 全部 + A + B
+
+        card = page.locator(f'.book-card[data-slug="{slug}"]')
+        group = card.get_attribute("data-group")
+        pill = page.locator(f'.library-index-link[data-group="{group}"]')
+        assert pill.is_visible()
+
+        # Filter to that letter, so the fallback below is observable.
+        pill.click()
+        assert page.locator(".book-card:not(.hidden)").count() == 1
+
+        # Delete the book through its own card menu.
+        card.locator(".menu-btn").click()
+        card.locator(".dropdown-item.danger").click()
+        page.wait_for_selector(
+            f'.library-index-link[data-group="{group}"][hidden]', state="attached")
+
+        assert not pill.is_visible(), "the empty letter is still in the index"
+        # ...and the filter fell back to 全部, so the shelf is not blank with the
+        # only way back hidden.
+        assert page.locator(".book-card:not(.hidden)").count() == 1
+        assert page.locator(".library-index-link.active").get_attribute(
+            "data-group") == "all"
+    finally:
+        page.close()
+
+
+def test_deleting_an_item_recounts_the_stats_bar(browser, base_url, isolated):
+    """P3-12: the counts are rendered once by the server, so a deletion used to
+    leave them claiming items that were gone — and an empty page still showing
+    four numbers."""
+    slug = upload_book(base_url, write_epub(isolated / "stats.epub"))
+    save_analysis(base_url, slug, "fact_check")
+    save_analysis(base_url, slug, "comment")
+
+    page = browser.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())     # the delete confirms
+    try:
+        page.goto(f"{base_url}/highlights/{quote(slug)}")
+        count = lambda kind: page.locator(
+            f'.stat-count[data-kind="{kind}"]').inner_text()
+        assert (count("fact_check"), count("comment"), count("total")) == ("1", "1", "2")
+
+        # Delete the 解释说明 card, by its kind rather than by position: the list
+        # is newest-first, so "the first card" is not a stable target.
+        page.locator('.highlight-item[data-kind="fact_check"]'
+                     ' .action-link.danger').click()
+        page.wait_for_function(
+            "() => document.querySelector('.stat-count[data-kind=\"total\"]')"
+            ".textContent.trim() === '1'")
+        assert count("fact_check") == "0"
+        assert count("comment") == "1"
+        assert count("total") == "1"
+
+        # The last one: the bar goes rather than showing four zeroes, and the
+        # empty page says so.
+        page.locator('.highlight-item[data-kind="comment"]'
+                     ' .action-link.danger').click()
+        page.wait_for_function(
+            "() => document.querySelector('.stats-bar').hidden === true")
+        assert page.locator("#no-results").is_visible()
     finally:
         page.close()
 

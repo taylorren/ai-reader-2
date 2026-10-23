@@ -77,7 +77,7 @@ recipes are in Appendix A.
 | P3-9 | Low | AI | AI client is created per call; one `except` is unreachable ✔ applied | S |
 | P3-10 | Low | Operations | No upload size cap and no staging-directory sweep ✔ applied (sweep; size cap declined) | S |
 | P3-11 | Low | UX | The unsupported reason is only a tooltip ✔ applied | S |
-| P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats | S |
+| P3-12 | Low | UX | Deleting a card leaves an empty pill and stale stats ✔ applied (and the Vue pages now have a harness) | S |
 | P3-13 | Low | Security | Markdown rendering fails open if DOMPurify is absent ✔ applied | S |
 | P3-14 | Low | Architecture | `routers/__init__.py` is a grab-bag | M |
 | P3-15 | Low | API | Dead API and schema surface ✔ applied (removals + docstrings; three more found) | S |
@@ -1579,7 +1579,7 @@ body, not only in the hover.
 
 ---
 
-### P3-12 · Deleting a card leaves an empty letter pill and stale stats
+### P3-12 · Deleting a card leaves an empty letter pill and stale stats ✔ applied — and the Vue pages have a harness now
 
 **Severity:** Low · **Effort:** S · **Area:** UX
 **Review:** ☐ accept ☐ defer ☐ reject
@@ -1597,6 +1597,38 @@ counts carefully.
 
 **Fix:** after removal, hide any `.library-index-link` with no visible card (`data-group`) and
 decrement/`recompute` the stats counts from the remaining items.
+
+**Applied (2026-10-23) — both views, plus the harness this finding was blocked on.**
+
+The fix as written is right, and the interesting part was where each half had to live:
+
+* **The library** (`library-app.js`): `hideEmptyGroups()` collects the groups that still have a card
+  and hides the pill for any that does not. It also **falls back to 全部** when the group in view is
+  the one that just emptied — otherwise the reader is looking at a blank shelf with the only way back
+  hidden, which is the same trust cost one step further on. The pills are hidden with `hidden`, so
+  `library.css` needed an explicit `.library-index-link[hidden] { display: none }`: a future
+  `display:` on the pill would silently beat the user-agent's rule and leave it on screen.
+* **The highlights view**: the counts were baked into the server's labels (`📋 {{ stats.fact_check }}
+  解释说明`), so there was nothing for the client to recompute. Each number is now its own
+  `.stat-count[data-kind]` element, and `recount()` counts the cards on screen — which reproduces the
+  server's `_stats()` exactly, because the server builds one item per analysis, so one `data-kind`
+  per card *is* what it counted. When nothing is left the bar is hidden rather than showing four
+  zeroes, and the empty page says so.
+* **The sibling case the finding did not name:** a deletion can also empty the *filter* that is in
+  view, which used to leave a blank grid with `#no-results` still hidden. `applyVisibility()` is now
+  shared by the filter and the recount, so both paths agree.
+* **The harness.** This finding was "implementable, verifiable only with a browser" while T1's step 3
+  was blocked; with the browser in place the honest harness is a Playwright test, not a stub — the
+  two pages render through Vue itself, so a hand-rolled DOM would be a lie about the thing being
+  tested. `tests/test_browser.py` now covers both pages, driving the real controls: the card's own
+  menu for a book, and the 删除批注 button for an item, with `confirm()` accepted the way a reader
+  accepts it.
+
+**Tested.** The letter pill: two books in different groups, filter to one, delete its only book
+through the card menu, and the pill goes while the shelf falls back to 全部. The stats: two saved
+items of different kinds, delete one and the counts move (1/1/2 → 0/1/1), delete the last and the bar
+hides with `#no-results` visible. Reverting either fix fails its test — the first times out waiting
+for the hidden pill, the second for the recounted total.
 
 ---
 

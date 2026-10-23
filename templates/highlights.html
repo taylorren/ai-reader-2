@@ -16,11 +16,18 @@
             <a href="/read/{{ slug | urlencode }}" class="back-link">继续阅读 →</a>
             <h1>{{ book_title }}</h1>
             <div class="book-meta">全部高亮与批注</div>
+            <!-- Each count is its own element so the client can recompute it
+                 after a deletion: the numbers used to be baked into the label,
+                 which left them claiming rows that were gone (REVIEW P3-12). -->
             <div class="stats-bar">
-                <span class="stat-item">📋 {{ stats.fact_check }} 解释说明</span>
-                <span class="stat-item">💡 {{ stats.discussion }} 深入讨论</span>
-                <span class="stat-item">💬 {{ stats.comment }} 个人笔记</span>
-                <span class="stat-item">📝 {{ stats.total }} 全部</span>
+                <span class="stat-item">📋 <span class="stat-count"
+                      data-kind="fact_check">{{ stats.fact_check }}</span> 解释说明</span>
+                <span class="stat-item">💡 <span class="stat-count"
+                      data-kind="discussion">{{ stats.discussion }}</span> 深入讨论</span>
+                <span class="stat-item">💬 <span class="stat-count"
+                      data-kind="comment">{{ stats.comment }}</span> 个人笔记</span>
+                <span class="stat-item">📝 <span class="stat-count"
+                      data-kind="total">{{ stats.total }}</span> 全部</span>
             </div>
         </header>
 

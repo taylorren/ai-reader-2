@@ -54,6 +54,9 @@ body {
 .book-meta { color: var(--muted); font-size: 0.9em; }
 
 .stats-bar { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 14px; }
+/* The bar is hidden when nothing is left, and `display: flex` above beats the
+   user-agent's `[hidden]` rule — so this one is not optional (REVIEW P3-12). */
+.stats-bar[hidden] { display: none; }
 .stat-item { font-size: 0.88em; color: var(--muted); }
 
 .filter-bar {

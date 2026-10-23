@@ -30,10 +30,37 @@ createApp({
                 item.style.display =
                     (kind === "all" || item.dataset.kind === kind) ? "" : "none";
             });
+            this.applyVisibility();
+        },
+        // Whether the grid still has anything to show. A deletion can empty the
+        // filter that is in view, which used to leave a blank page with no
+        // explanation at all (REVIEW P3-12's sibling case).
+        applyVisibility() {
             const any = [...document.querySelectorAll(".highlight-item")]
                 .some((item) => item.style.display !== "none");
             const none = document.getElementById("no-results");
             if (none) none.hidden = any;
+        },
+        // The counts were rendered once by the server, so deleting a row left
+        // them claiming items that were gone (REVIEW P3-12). Recounted from what
+        // is on screen: the server builds one item per analysis, so one
+        // `data-kind` per card is exactly what `_stats()` counted.
+        recount() {
+            const counts = {};
+            let total = 0;
+            document.querySelectorAll(".highlight-item").forEach((item) => {
+                const kind = item.dataset.kind;
+                counts[kind] = (counts[kind] || 0) + 1;
+                total += 1;
+            });
+            document.querySelectorAll(".stat-count").forEach((node) => {
+                const kind = node.dataset.kind;
+                node.textContent = kind === "total" ? total : (counts[kind] || 0);
+            });
+            // Nothing left: four zeroes over an empty page is not a summary.
+            const bar = document.querySelector(".stats-bar");
+            if (bar) bar.hidden = total === 0;
+            this.applyVisibility();
         },
         async deleteAnalysis(event) {
             const button = event.currentTarget;
@@ -42,6 +69,7 @@ createApp({
                 { method: "DELETE" });
             if (response.ok) {
                 button.closest(".highlight-item").remove();
+                this.recount();
             } else {
                 alert("删除失败，请重试。");
             }
@@ -53,6 +81,7 @@ createApp({
                 { method: "DELETE" });
             if (response.ok) {
                 button.closest(".highlight-item").remove();
+                this.recount();
             } else {
                 alert("删除失败，请重试。");
             }

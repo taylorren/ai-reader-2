@@ -118,6 +118,10 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
     cursor: pointer;
 }
 .library-index-link:hover { border-color: var(--accent); color: var(--accent); }
+/* Explicit, because a pill whose group is empty is hidden with `hidden` — and
+   a future `display:` here would silently beat the user-agent's `[hidden]`
+   rule, leaving the pill on screen (REVIEW P3-12). */
+.library-index-link[hidden] { display: none; }
 .library-index-link.active {
     background: var(--accent);
     border-color: var(--accent);

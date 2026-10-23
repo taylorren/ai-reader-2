@@ -55,6 +55,33 @@ const app = createApp({
             const none = document.getElementById("no-results");
             if (none) none.hidden = visible > 0;
         },
+        // A group whose last card is gone must not keep its letter in the index:
+        // clicking it would filter to nothing (REVIEW P3-12). If that group is
+        // the one in view, the filter falls back to 全部 — otherwise the reader
+        // is looking at an empty grid with the only way back hidden.
+        hideEmptyGroups() {
+            const groups = new Set();
+            document.querySelectorAll(".book-card").forEach((card) => {
+                groups.add(card.dataset.group);
+            });
+            let fellBack = false;
+            document.querySelectorAll(".library-index-link").forEach((pill) => {
+                const key = pill.dataset.group;
+                if (key === "all") return;
+                const empty = !groups.has(key);
+                pill.hidden = empty;
+                if (empty && pill.classList.contains("active")) {
+                    pill.classList.remove("active");
+                    fellBack = true;
+                }
+            });
+            if (fellBack) {
+                const all = document.querySelector(
+                    '.library-index-link[data-group="all"]');
+                if (all) all.classList.add("active");
+                this.group = "all";
+            }
+        },
         toggleMenu(event) {
             const menu = event.currentTarget.parentElement.querySelector(".dropdown-menu");
             const wasOpen = menu.classList.contains("show");
@@ -109,7 +136,11 @@ const app = createApp({
                 if (!response.ok) throw new Error(result.detail || "Failed to delete book");
                 card.style.opacity = "0";
                 card.style.transform = "scale(0.8)";
-                setTimeout(() => { card.remove(); this.applyFilters(); }, 250);
+                setTimeout(() => {
+                    card.remove();
+                    this.hideEmptyGroups();
+                    this.applyFilters();
+                }, 250);
                 this.showStatus(`✓ ${result.message}`, "success");
             } catch (error) {
                 alert(`Error: ${error.message}`);
