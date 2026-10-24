@@ -168,6 +168,14 @@ def save_progress(base_url, slug, **fields):
     assert response.status_code == 200, response.text
 
 
+def stored_settings(base_url):
+    """What the server reports the AI provider is — the route the panel reads."""
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.get("/api/settings")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def save_analysis(base_url, slug, kind, index=0, text="a saved line of the book"):
     """A stored mark with one analysis of `kind` — no AI involved."""
     with httpx.Client(base_url=base_url, timeout=30) as client:
@@ -564,5 +572,122 @@ def test_a_repeated_sentence_marks_the_one_that_was_selected(browser, base_url, 
             "node => (node.previousSibling && node.previousSibling.nodeValue) || ''")
         assert before.strip().endswith("In between stands a marker."), (
             f"the mark landed on the wrong occurrence: {before!r}")
+    finally:
+        page.close()
+
+
+def test_the_copy_action_copies_where_the_clipboard_api_is_absent(
+        browser, base_url, isolated):
+    """复制文本 on the deployment that actually exists: plain http on a LAN.
+
+    `navigator.clipboard` is a *secure context* feature — https, or localhost.
+    At home this reader is served at `http://192.168.…:8123`, where the property
+    is simply absent, and the copy action called it unguarded: selecting text and
+    choosing 复制文本 raised `TypeError: navigator.clipboard is undefined`, copied
+    nothing and said nothing — no toast, no error on screen. Every test until now
+    ran on 127.0.0.1, where the API does exist, so nothing caught it.
+
+    Removing the property is all an insecure context does, so the page models the
+    LAN deployment, and the copy is observed where it lands: the text the
+    fallback hands to the document's own copy command. The page-error check is
+    the other half — the failure *was* an exception, and a silent one.
+    """
+    slug = upload_book(base_url, write_long_epub(isolated / "long.epub"))
+    block = block_named(chapter_payload(base_url, slug)["blocks"], "Paragraph 3 ")
+
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("#p3").wait_for()
+
+        page.evaluate(
+            """() => {
+                Object.defineProperty(navigator, 'clipboard', { value: undefined });
+                window.__copied = [];
+                const real = document.execCommand.bind(document);
+                document.execCommand = (command) => {
+                    if (command === 'copy') {
+                        window.__copied.push(document.getSelection().toString());
+                    }
+                    return real(command);
+                };
+            }""")
+
+        # A real selection in the book's own document, and the mouseup that opens
+        # the menu over it — what a reader does with a mouse.
+        frame.locator("#p3").evaluate(
+            """node => {
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            }""")
+        page.locator('#context-menu .context-menu-item[data-action="copy"]').click()
+
+        copied = page.evaluate("() => window.__copied")
+        assert copied and collapsed(copied[0]) == collapsed(block["text"]), (
+            f"the selected text never reached the clipboard: {copied!r}")
+        assert page.locator("#toast").inner_text() == "已复制到剪贴板"
+        assert errors == [], f"the page raised: {errors}"
+    finally:
+        page.close()
+
+
+def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
+    """The provider used to be changeable only inside the AI panel — which is
+    not on screen until a selection opens it, so "which model answers" was
+    invisible until the reader had already asked something.
+
+    The bar carries it now. The panel stays closed throughout: the toggle is the
+    setting, it is what the server is set to, and the next page load renders it
+    checked — that last one is the server's own render, not a script's guess.
+    """
+    slug = upload()
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        toggle = page.locator("#provider-toggle")
+        toggle.wait_for()
+        assert page.locator("#ai-panel").is_hidden(), "the panel starts closed"
+
+        local = toggle.locator('.provider-option[data-provider="ollama"]')
+        cloud = toggle.locator('.provider-option[data-provider="ollama_cloud"]')
+        # The shell rendered the provider the server is set to: the cloud
+        # default, with the local option there to be chosen.
+        assert cloud.get_attribute("aria-checked") == "true"
+        assert local.get_attribute("aria-checked") == "false"
+
+        local.click()
+
+        assert local.get_attribute("aria-checked") == "true"
+        assert cloud.get_attribute("aria-checked") == "false"
+        assert stored_settings(base_url)["provider_override"] == "ollama"
+        assert page.locator("#ai-panel").is_hidden(), "no panel was needed"
+        # The panel's own select is the same setting, not a second one.
+        assert page.locator("#provider-select").input_value() == "ollama"
+
+        # It is the server's choice now: a reload renders it checked, from the
+        # markup (routers/reader.py), before any script runs.
+        page.reload()
+        toggle.wait_for()
+        assert toggle.locator(
+            '.provider-option[data-provider="ollama"]').get_attribute(
+                "aria-checked") == "true"
+
+        # A radiogroup is one tab stop, and the arrows move the choice.
+        local = toggle.locator('.provider-option[data-provider="ollama"]')
+        local.focus()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function(
+            "() => document.querySelector('#provider-toggle "
+            ".provider-option[data-provider=\"ollama_cloud\"]')"
+            ".getAttribute('aria-checked') === 'true'")
+        assert stored_settings(base_url)["provider_override"] == "ollama_cloud"
     finally:
         page.close()

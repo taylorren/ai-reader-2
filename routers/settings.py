@@ -10,8 +10,6 @@ Landed:
 
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -24,7 +22,7 @@ from ai_service import PROVIDERS
 # accident — it re-read the attribute per call — and it is also why the
 # dependency direction was invisible (REVIEW P3-14).
 from . import app_state
-from .app_state import book_cache, get_db, runtime_settings
+from .app_state import book_cache, default_provider, get_db, runtime_settings
 
 router = APIRouter()
 
@@ -39,7 +37,7 @@ def get_settings():
     """The current provider override and the .env default behind it."""
     return {
         "provider_override": runtime_settings["provider_override"],
-        "default_provider": os.getenv("OLLAMA_DEFAULT_PROVIDER", "ollama_cloud"),
+        "default_provider": default_provider(),
         "status": "success",
     }
 

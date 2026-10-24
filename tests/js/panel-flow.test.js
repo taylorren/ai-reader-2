@@ -23,8 +23,8 @@ const SELECTION = {
     context_after: " and then keeps going",
 };
 
-function scriptedPage() {
-    const page = createPage();
+function scriptedPage(options = {}) {
+    const page = createPage(options);
     page.route(/\/api\/ai\/analyze$/, {
         response: "## 解释\n\n这是一段解释。", provider_used: "ollama",
         status: "success",
@@ -159,6 +159,121 @@ test("Space activates a menu item too", async () => {
 
     assert.equal(page.el("context-menu").hidden, true);
     assert.equal(page.el("toast").textContent, "已复制到剪贴板");
+});
+
+// -- 复制文本 ---------------------------------------------------------------
+//
+// Copying must not depend on the Clipboard API. That API is a *secure context*
+// feature — https, or localhost — and the reader is normally served over plain
+// http on a LAN address (http://192.168.…:8123), where `navigator.clipboard` is
+// simply absent. The action called it unguarded, so on the deployment that
+// exists the click raised `TypeError: navigator.clipboard is undefined`, copied
+// nothing and said nothing — and every test until now ran on localhost, where
+// the API is there.
+
+test("the Clipboard API is used when the browser has one", async () => {
+    const page = scriptedPage();
+    page.el("context-menu").hidden = false;
+    page.menuItems.find((i) => i.dataset.action === "copy").click();
+    await page.settle();
+
+    assert.deepEqual(page.clipboardWrites, [SELECTION.text]);
+    assert.deepEqual(page.document.copied, [], "the fallback was not needed");
+    assert.equal(page.el("toast").textContent, "已复制到剪贴板");
+});
+
+test("an insecure origin copies through the fallback instead of throwing", async () => {
+    const page = scriptedPage({ clipboard: false });
+    page.el("context-menu").hidden = false;
+    page.menuItems.find((i) => i.dataset.action === "copy").click();
+    await page.settle();
+
+    assert.deepEqual(page.document.copied, [SELECTION.text],
+                     "the document was asked to copy the selected text");
+    assert.equal(page.el("toast").textContent, "已复制到剪贴板");
+    assert.equal(page.el("toast").className.includes("error"), false);
+
+    const staging = page.created.filter((element) => element.tagName === "TEXTAREA");
+    assert.equal(staging.length, 1, "one staging textarea");
+    assert.ok(staging[0].removed, "and it is taken back out of the document");
+});
+
+test("a refused Clipboard API falls back rather than giving up", async () => {
+    const page = scriptedPage({ clipboard: "denied" });
+    page.el("context-menu").hidden = false;
+    page.menuItems.find((i) => i.dataset.action === "copy").click();
+    await page.settle();
+
+    assert.deepEqual(page.document.copied, [SELECTION.text]);
+    assert.equal(page.el("toast").textContent, "已复制到剪贴板");
+});
+
+test("a copy that did not happen says so, instead of claiming success", async () => {
+    const page = scriptedPage({ clipboard: false });
+    page.document.copyWorks = false;
+    page.el("context-menu").hidden = false;
+    page.menuItems.find((i) => i.dataset.action === "copy").click();
+    await page.settle();
+
+    assert.equal(page.el("toast").textContent, "复制失败，请手动复制");
+    assert.ok(page.el("toast").className.includes("error"),
+              "and the toast is the error kind");
+});
+
+// -- the AI provider, in the bar --------------------------------------------
+//
+// The provider was changeable only inside the AI panel, which is not on screen
+// until a selection opens it — so "which model answers" was a setting the
+// reader could not see, let alone set, until they had already asked something.
+// The bar's toggle is the same setting in the open: two named options, and one
+// value shared with the panel's select, so the two cannot disagree.
+
+test("the bar's toggle and the panel's select are one setting", async () => {
+    const page = scriptedPage();
+    page.route(/\/api\/settings$/, { provider_override: "ollama", status: "success" });
+
+    const local = page.providerOptions.find((o) => o.dataset.provider === "ollama");
+    page.fire("click", page.el("provider-toggle"), { target: local });
+    await page.settle();
+
+    assert.equal(page.P.state.provider, "ollama");
+    assert.equal(page.body(page.lastRequest(/\/api\/settings$/)).provider_override,
+                 "ollama", "the choice is stored, as the panel's select did");
+    assert.equal(local.getAttribute("aria-checked"), "true");
+    assert.equal(page.providerOptions[1].getAttribute("aria-checked"), "false");
+    assert.equal(page.el("provider-select").value, "ollama",
+                 "the panel's select shows the same value");
+
+    // …and it is what the next request carries, without opening the panel.
+    page.menuItems.find((i) => i.dataset.action === "fact_check").click();
+    await page.settle(); await page.settle();
+    assert.equal(page.body(page.lastRequest(/\/api\/ai\/analyze$/)).provider, "ollama");
+});
+
+test("a radiogroup is one tab stop, and the arrows move it", async () => {
+    const page = scriptedPage();
+    page.route(/\/api\/settings$/, { provider_override: "ollama", status: "success" });
+
+    // Only the checked option is in the tab order: the group is one stop.
+    assert.deepEqual(page.providerOptions.map((o) => o.tabIndex), [-1, 0]);
+
+    page.fire("keydown", page.el("provider-toggle"), { key: "ArrowRight" });
+    await page.settle();
+
+    assert.equal(page.P.state.provider, "ollama", "the arrow chose the other option");
+    assert.equal(page.providerOptions[0].focused, true, "and focus moved with it");
+    assert.deepEqual(page.providerOptions.map((o) => o.tabIndex), [0, -1]);
+});
+
+test("the provider the shell was rendered with is the one in force", async () => {
+    // `provider:` is what the server rendered as checked (routers/reader.py).
+    // Reading it back means the first paint is authoritative: if /api/settings
+    // cannot be reached, the control and the requests still agree.
+    const page = scriptedPage({ provider: "ollama" });
+
+    assert.equal(page.P.state.provider, "ollama");
+    assert.equal(page.el("provider-select").value, "ollama");
+    assert.equal(page.providerOptions[0].getAttribute("aria-checked"), "true");
 });
 
 test("Ctrl+K opens the menu over a selection made with the keyboard", async () => {

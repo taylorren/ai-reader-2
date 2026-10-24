@@ -33,11 +33,20 @@ function makeElement(tag, registry) {
         getAttribute(name) { return this._attributes[name]; },
         removeAttribute(name) { delete this._attributes[name]; },
         remove() { this.removed = true; },
+        select() { this.selected = true; },
         scrollIntoView() {},
+        // `.class` only: the shell's own listeners use compound selectors
+        // (`#ai-panel, #context-menu, #toggle-panel`) that no stub element is
+        // inside, while the provider toggle's click handler asks which option
+        // was pressed.
+        closest(selector) {
+            if (!selector.startsWith(".")) return null;
+            return (this.className || "").split(" ").includes(selector.slice(1))
+                ? this : null;
+        },
         querySelector: () => null,
         querySelectorAll: () => [],
         focus() { this.focused = true; },
-        closest: () => null,
         getBoundingClientRect: () => ({ top: 0, left: 0, width: 100, height: 100 }),
         classList: {
             add: (name) => element._classes.add(name),
@@ -73,9 +82,23 @@ function createPage(options = {}) {
     const created = [];
     const requests = [];
     const routes = [];
+    const clipboardWrites = [];
     let currentIndex = 0;
 
     const documentStub = {
+        // The copy fallback's other half (panel.js, copyText): it selects a
+        // staging textarea and asks the document to copy that selection. A stub
+        // has no clipboard, so what it can see — and what a test needs — is the
+        // text the document was asked to copy. `copyWorks: false` is a browser
+        // that refuses.
+        copied: [],
+        copyWorks: true,
+        execCommand(command) {
+            if (command !== "copy") return false;
+            const staging = created.filter((element) => element.selected).pop();
+            this.copied.push(staging ? staging.value : null);
+            return this.copyWorks;
+        },
         getElementById: (id) => (registry[id] ||= Object.assign(
             makeElement("div", registry), { id })),
         createElement: (tag) => {
@@ -84,8 +107,15 @@ function createPage(options = {}) {
             return element;
         },
         querySelectorAll: (selector) => (selector.includes("context-menu-item")
-            ? menuItems : []),
-        querySelector: () => null,
+            ? menuItems
+            : selector.includes("provider-option") ? providerOptions : []),
+        // The shell's own attribute selector for the rendered provider
+        // (panel.js's renderedProvider), answered from the options — so a test
+        // can say which one the server rendered.
+        querySelector: (selector) => (selector.includes("provider-option")
+            ? providerOptions.find(
+                (option) => option.getAttribute("aria-checked") === "true") || null
+            : null),
         addEventListener() {},
         body: makeElement("body", registry),
     };
@@ -94,6 +124,29 @@ function createPage(options = {}) {
         const item = makeElement("div", registry);
         item.dataset.action = action;
         return item;
+    });
+
+    // The bar's provider toggle (templates/reader.html): a radiogroup of two
+    // options, so a test can click one and see what the page sends — and see
+    // both controls painted from the same value. `createPage({provider})` is the
+    // *server-rendered* choice: which option arrives checked, before any script
+    // has run.
+    const providerOptions = ["ollama", "ollama_cloud"].map((provider) => {
+        const option = makeElement("button", registry);
+        option.dataset.provider = provider;
+        option.className = "provider-option";
+        return option;
+    });
+    if (options.provider) {
+        for (const option of providerOptions) {
+            option.setAttribute("aria-checked",
+                option.dataset.provider === options.provider ? "true" : "false");
+        }
+    }
+    registry["provider-toggle"] = Object.assign(makeElement("div", registry), {
+        id: "provider-toggle",
+        querySelectorAll: (selector) => (selector.includes("provider-option")
+            ? providerOptions : []),
     });
 
     async function fetchStub(url, options) {
@@ -113,13 +166,30 @@ function createPage(options = {}) {
         throw new Error(`the page asked for an unscripted URL: ${url}`);
     }
 
+    // A browser's Clipboard API is a *secure context* feature: present on
+    // localhost and on https, absent on the plain-http LAN address this reader
+    // is really served from. `clipboard: false` models that deployment;
+    // `clipboard: "denied"` models a browser that has the API and refuses the
+    // write (a permission policy, an unfocused window).
+    const navigatorStub = options.clipboard === false ? {} : {
+        clipboard: {
+            writeText(text) {
+                if (options.clipboard === "denied") {
+                    return Promise.reject(new Error("NotAllowedError"));
+                }
+                clipboardWrites.push(text);
+                return Promise.resolve();
+            },
+        },
+    };
+
     const sandbox = {
         document: documentStub,
         fetch: fetchStub,
         console,
         setTimeout: () => 0,          // timers are not what these tests are about
         clearTimeout: () => {},
-        navigator: { clipboard: { writeText() {} } },
+        navigator: navigatorStub,
         marked: { parse: (markdown) => markdown },
         // A passthrough sanitiser: the real one is a vendor bundle, and these
         // tests are about what the panel does with its output. `domPurify:
@@ -152,6 +222,9 @@ function createPage(options = {}) {
         created,
         requests,
         menuItems,
+        providerOptions,
+        document: documentStub,
+        clipboardWrites,
         frame: () => documentStub.getElementById("chapter-frame"),
         // Fire an event on a stub element, as the browser would: the shell's
         // frame `load` handler is how an in-book link is noticed, and its

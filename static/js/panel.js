@@ -112,16 +112,43 @@ window.ReaderPanel = (function () {
 
     // -- provider ------------------------------------------------------------
 
+    // The provider has two controls and one value: the bar's toggle, which is
+    // always in sight, and the panel's select, which is in sight only while the
+    // panel is open. `renderProvider` paints both from `state.provider`, so
+    // neither can drift from the other — nor from what the server is set to.
+    function renderProvider() {
+        for (const option of document.querySelectorAll("#provider-toggle .provider-option")) {
+            const chosen = option.dataset.provider === state.provider;
+            option.setAttribute("aria-checked", chosen ? "true" : "false");
+            // A radiogroup is one tab stop: Tab lands on the checked option and
+            // the arrows move within the group (see init's keydown).
+            option.tabIndex = chosen ? 0 : -1;
+        }
+        el("provider-select").value = state.provider;
+    }
+
+    // The choice the shell was rendered with — the server's own answer
+    // (routers/reader.py). Reading it back from the markup keeps the first paint
+    // authoritative: if /api/settings cannot be reached, the control on screen
+    // and the provider sent with a request still agree.
+    function renderedProvider() {
+        const checked = document.querySelector(
+            "#provider-toggle .provider-option[aria-checked='true']");
+        return (checked && checked.dataset.provider)
+            || el("provider-select").value || "ollama_cloud";
+    }
+
     async function loadSettings() {
         try {
             const settings = await api("/api/settings");
             state.provider = settings.provider_override || settings.default_provider;
-            el("provider-select").value = state.provider;
-        } catch (error) { /* the default stays */ }
+            renderProvider();
+        } catch (error) { /* the shell's server-rendered choice stands */ }
     }
 
     async function setProvider(provider) {
         state.provider = provider;
+        renderProvider();
         try {
             await api("/api/settings", {
                 method: "POST",
@@ -230,8 +257,36 @@ window.ReaderPanel = (function () {
     P.loadSettings = loadSettings;
 
     P.init = function () {
+        // The provider the shell was rendered with, before any request: the
+        // server rendered it, so it is already the right one (routers/reader.py)
+        // — and /api/settings only confirms it.
+        state.provider = renderedProvider();
+        renderProvider();
         el("provider-select").addEventListener("change",
             (event) => setProvider(event.currentTarget.value));
+        // The bar's toggle. A radiogroup is one tab stop, so the arrows move
+        // between the two options; a click, or Space/Enter on an option, is
+        // native button behaviour and arrives as a click.
+        const providerToggle = el("provider-toggle");
+        providerToggle.addEventListener("click", (event) => {
+            const option = event.target.closest(".provider-option");
+            if (option && option.dataset.provider !== state.provider) {
+                setProvider(option.dataset.provider);   // nothing to store if unchanged
+            }
+        });
+        providerToggle.addEventListener("keydown", (event) => {
+            const step = { ArrowLeft: -1, ArrowUp: -1,
+                           ArrowRight: 1, ArrowDown: 1 }[event.key];
+            if (!step) return;
+            const options = [...providerToggle.querySelectorAll(".provider-option")];
+            const at = options.findIndex(
+                (option) => option.dataset.provider === state.provider);
+            const next = options[(at + step + options.length) % options.length];
+            if (!next) return;
+            event.preventDefault();
+            next.focus();
+            setProvider(next.dataset.provider);
+        });
         el("panel-close").addEventListener("click", () => requestClose());
         el("toggle-panel").addEventListener("click", () => openPanel());
         el("panel-save").addEventListener("click", () => saveCurrent());
@@ -455,13 +510,55 @@ window.ReaderPanel = (function () {
     // saveCurrent): choosing an action, explaining the text and then walking
     // away must leave no mark behind.
 
+    // Copying cannot go through the Clipboard API alone. That API exists only
+    // in a *secure context* — https, or localhost — and this reader is normally
+    // served over plain http on a LAN address (http://192.168.…:8123), where
+    // `navigator.clipboard` is not there at all. 复制文本 called it unguarded,
+    // so on the real deployment it raised `TypeError: navigator.clipboard is
+    // undefined`: the text was not copied, no toast appeared, and nothing said
+    // so. Every test ran on 127.0.0.1, where the API does exist — which is why
+    // this survived the rewrite (the reference implementation had the fallback
+    // below; the port dropped it).
+    //
+    // Returns whether the text really reached the clipboard, so the caller can
+    // report a failure instead of a copy that never happened.
+    async function copyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch (error) {
+                // A refused permission (a browser policy, an unfocused window)
+                // is not a reason to give up: try the fallback first.
+                console.warn("clipboard.writeText refused the copy:", error);
+            }
+        }
+        // The fallback: a staging textarea, selected, copied by the document
+        // itself. It works on an insecure origin, which is the whole point.
+        const staging = document.createElement("textarea");
+        staging.value = text;
+        staging.setAttribute("readonly", "");
+        staging.style.position = "fixed";
+        staging.style.top = "-1000px";
+        document.body.appendChild(staging);
+        try {
+            staging.select();
+            return document.execCommand("copy") === true;
+        } catch (error) {
+            console.warn("the fallback copy failed:", error);
+            return false;
+        } finally {
+            staging.remove();
+        }
+    }
+
     async function handleAction(action) {
         const selection = state.selection;
         if (action === "copy") {
-            if (selection) {
-                navigator.clipboard.writeText(selection.text);
-                toast("已复制到剪贴板");
-            }
+            if (!selection) { toast("请先选中文字"); return; }
+            const copied = await copyText(selection.text);
+            if (copied) toast("已复制到剪贴板");
+            else toast("复制失败，请手动复制", "error");
             return;
         }
         if (!selection) { toast("请先选中文字"); return; }

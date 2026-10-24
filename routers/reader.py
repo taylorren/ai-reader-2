@@ -30,7 +30,7 @@ from fastapi.templating import Jinja2Templates
 # accident — it re-read the attribute per call — and it is also why the
 # dependency direction was invisible (REVIEW P3-14).
 from . import app_state
-from .app_state import BASE_DIR, book_cache, get_db
+from .app_state import BASE_DIR, book_cache, effective_provider, get_db
 from .assets import get_asset_version
 
 router = APIRouter()
@@ -195,6 +195,11 @@ def shell_context(request: Request, slug: str, row: dict, book, chapter_index: i
             "static/js/reader.js", "static/js/panel.js",
             "static/js/reader-core.js", "static/css/reader.css"),
         "initial_src": initial_src,
+        # Which AI answers, for the two controls that show it (the bar's toggle
+        # and the panel's select). Server-rendered so the choice is right on the
+        # first paint and stays right with no JavaScript — the same value
+        # /api/settings serves, from the same definition (app_state.effective_provider).
+        "provider": effective_provider(),
         "book_data": {
             "slug": slug,
             "index": chapter_index,

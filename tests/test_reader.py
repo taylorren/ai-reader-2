@@ -288,6 +288,36 @@ def test_a_supported_book_still_opens_normally(isolated_client, isolated):
     assert isolated_client.get(f"/api/book/{slug}").json()["unsupported"] is None
 
 
+def test_the_shell_renders_the_provider_in_force(isolated_client, isolated):
+    """Which AI answers is on the page, not only in the panel — and it is the
+    server that puts it there.
+
+    The bar's toggle and the panel's select are one setting, rendered from
+    `app_state.effective_provider` — the same definition `/api/settings` serves.
+    Rendering it means the reader sees the choice on the first paint and with no
+    JavaScript at all; a script only keeps the two controls in step afterwards.
+    """
+    slug = upload(isolated_client, isolated)
+
+    def checked(html):
+        """The provider options the shell rendered as the chosen one."""
+        return re.findall(r'data-provider="(\w+)"[^>]*aria-checked="true"', html)
+
+    def selected_option(html):
+        return re.findall(r'<option value="(\w+)" selected>', html)
+
+    default = isolated_client.get("/api/settings").json()["default_provider"]
+    page = isolated_client.get(f"/read/{slug}/0").text
+    assert checked(page) == [default]
+    assert selected_option(page) == [default]
+
+    # A runtime override is what the next render shows — both controls.
+    isolated_client.post("/api/settings", json={"provider_override": "ollama"})
+    page = isolated_client.get(f"/read/{slug}/0").text
+    assert checked(page) == ["ollama"]
+    assert selected_option(page) == ["ollama"]
+
+
 def test_the_pages_declare_the_language_they_are_written_in(isolated_client,
                                                            isolated):
     """P3-4: all three pages said lang="en" while the interface, the buttons and

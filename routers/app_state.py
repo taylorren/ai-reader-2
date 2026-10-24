@@ -191,6 +191,25 @@ def get_db():
 # Runtime settings, mirroring ai-reader: a provider override chosen from the
 # settings panel, kept in memory (a restart returns to the .env default).
 runtime_settings = {"provider_override": None}
+
+
+def default_provider() -> str:
+    """The provider `.env` asks for; `ollama_cloud` if it says nothing."""
+    return os.getenv("OLLAMA_DEFAULT_PROVIDER", "ollama_cloud")
+
+
+def effective_provider() -> str:
+    """The provider in force: the runtime override, else the .env default.
+
+    One definition for the two things that have to agree — `/api/settings`,
+    which the panel reads, and the reader shell's own render, which is what the
+    bar's provider toggle shows before a script has run. They were two
+    expressions of the same rule, and the shell could then open showing one
+    provider while the API reported the other.
+    """
+    return runtime_settings["provider_override"] or default_provider()
+
+
 _ai_service = None
 
 

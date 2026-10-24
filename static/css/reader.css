@@ -256,6 +256,15 @@ body.dark-mode .toc-caret:hover { color: #f3ead7; }
     display: flex;
     align-items: center;
     gap: 8px;
+    /* The row is full, and this is where it shows. These controls need ~494px;
+       the column has 364px at a 1280px window (the sidebar takes 280, the
+       centered chapter nav 250, and the two side columns share what is left
+       equally so the nav stays centered). The bar therefore wraps to a second
+       line on a laptop window — 89px tall instead of 53px — rather than
+       clipping its last control, and is one row again at ≥1600px and below
+       900px, where the top chapter nav is hidden. */
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .bar-btn {
@@ -454,6 +463,50 @@ body.dark-mode .toc-caret:hover { color: #f3ead7; }
 }
 .style-toggle[aria-checked="true"] .toggle-track { background: var(--accent); }
 .style-toggle[aria-checked="true"] .toggle-knob { left: 16px; }
+
+/* The AI provider, in the bar rather than only in the panel: two named options
+   so the choice is visible before anything is selected. It is a radiogroup —
+   one tab stop, arrows move between the options (panel.js) — and the checked
+   one carries the accent, in both themes, without relying on colour alone. */
+.provider-toggle {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 0.85em;
+}
+
+.provider-label {
+    padding: 0 7px;
+    color: var(--muted);
+    font-size: 0.9em;
+}
+
+.provider-option {
+    background: transparent;
+    color: var(--text);
+    border: none;
+    border-left: 1px solid var(--line);
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 1em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.provider-option:hover[aria-checked="false"] { background: var(--accent-soft); }
+
+.provider-option[aria-checked="true"] {
+    background: var(--accent-soft);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.provider-option:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
 
 /* Chapter navigation: the footer half of the shared nav component. */
 .reader-footer {

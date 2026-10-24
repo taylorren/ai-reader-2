@@ -48,6 +48,23 @@
                         <span class="toggle-track"><span class="toggle-knob"></span></span>
                     </button>
                     <button id="theme-toggle" class="bar-btn" title="夜间模式">🌙</button>
+                    <!-- Which AI answers, in the open. The panel's own select is
+                         out of sight until a selection opens the panel, and this
+                         is a choice a reader wants to make — and see — before
+                         they select anything. Both controls are one setting;
+                         panel.js paints them from the same state. -->
+                    <div id="provider-toggle" class="provider-toggle" role="radiogroup"
+                         aria-label="AI 提供方">
+                        <span class="provider-label" aria-hidden="true">AI</span>
+                        <button type="button" class="provider-option" role="radio"
+                                data-provider="ollama" title="本地 Ollama"
+                                aria-checked="{{ 'true' if provider == 'ollama' else 'false' }}"
+                                tabindex="{{ 0 if provider == 'ollama' else -1 }}">本地</button>
+                        <button type="button" class="provider-option" role="radio"
+                                data-provider="ollama_cloud" title="云端 Ollama"
+                                aria-checked="{{ 'true' if provider != 'ollama' else 'false' }}"
+                                tabindex="{{ 0 if provider != 'ollama' else -1 }}">云端</button>
+                    </div>
                 </div>
             </div>
 
@@ -98,8 +115,8 @@
                     <a id="panel-highlights-link" class="panel-link"
                        href="/highlights/{{ slug | urlencode }}">全部高亮 ↗</a>
                     <select id="provider-select" class="font-select" title="AI 提供方">
-                        <option value="ollama">本地 Ollama</option>
-                        <option value="ollama_cloud">云端 Ollama</option>
+                        <option value="ollama" {% if provider == 'ollama' %}selected{% endif %}>本地 Ollama</option>
+                        <option value="ollama_cloud" {% if provider != 'ollama' %}selected{% endif %}>云端 Ollama</option>
                     </select>
                 </div>
                 <blockquote id="panel-selected" class="panel-selected"></blockquote>
