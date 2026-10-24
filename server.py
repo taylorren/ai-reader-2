@@ -27,7 +27,9 @@ def load_env():
     """
     env_path = BASE_DIR / ".env"
     if not env_path.exists():
-        print("⚠ No .env file — AI features will not work.")
+        # Not "AI features will not work": in a container there is no .env by
+        # design and the environment carries the settings (Dockerfile, compose).
+        print("⚠ No .env file — AI settings must come from the environment.")
         return
 
     print("Loading .env file...")

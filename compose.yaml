@@ -1,0 +1,45 @@
+# ai-reader-2 in a container:  docker compose up -d
+#
+# Same deployment shape as the 1.0.0 image (which was built from ai-reader):
+# port 8123, the library at /app/books, the database at /data, uid 1000. Both
+# volumes are bind mounts so the data survives image rebuilds.
+#
+# Two things about the data change from that image:
+#   * books/ holds `books/<slug>/<slug>.epub` now, not `<slug>_data/book.pkl`.
+#     The old folders are ignored; re-upload each EPUB (highlights, analyses and
+#     progress come back with it — the slug is unchanged).
+#   * the database is the same file, grown a `books` table. Point ./data at the
+#     directory that already holds reader_data.db; the annotations are keyed by
+#     slug and chapter, and the app fills the books table as you re-upload.
+#
+# The container runs as uid 1000 (= the NAS `tr` account); if you bind-mount a
+# directory that `tr` does not own, chown it first or the app cannot write.
+
+services:
+  reader:
+    image: taylorren/epub-ai-reader:2.0.0
+    container_name: epub-ai-reader
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    volumes:
+      # BASE_DIR/books — the EPUBs themselves, one folder per book.
+      - ./books:/app/books
+      # READER_DB, below. Holds reader_data.db and its -wal/-shm companions.
+      - ./data:/data
+      # Optional: drop a .env next to compose.yaml to configure Ollama.
+      # - ./.env:/app/.env:ro
+    environment:
+      READER_HOST: "0.0.0.0"
+      READER_PORT: "8123"
+      READER_DB: "/data/reader_data.db"
+      # Point at your Ollama host from inside the container.
+      # "host.docker.internal" works with `extra_hosts` below.
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}"
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-ollama}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3}"
+      OLLAMA_CLOUD_MODEL: "${OLLAMA_CLOUD_MODEL:-gpt-oss:120b-cloud}"
+      # Provider the panel opens on: ollama or ollama_cloud.
+      OLLAMA_DEFAULT_PROVIDER: "${OLLAMA_DEFAULT_PROVIDER:-ollama_cloud}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
