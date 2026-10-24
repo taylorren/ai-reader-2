@@ -12,11 +12,13 @@ that is not a book at all is refused with the same named reason.
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -218,7 +220,7 @@ def upload_book(file: UploadFile = File(...)):
         folder = app_state.BOOKS_DIR / target_slug
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / f"{target_slug}.epub"
-        os.replace(temp_path, target)
+        _move_into_place(temp_path, target)
 
         word_count = 0 if book.unsupported else estimate_book_word_count(book)
         reason = book.unsupported
@@ -260,6 +262,38 @@ def _same_book(row: dict, book: Book) -> bool:
         return row["identifier"] == book.identifier
     return ((row["title"] or "") == (book.title or "")
             and (row["author"] or "") == (book.author or ""))
+
+
+def _move_into_place(source: Path, target: Path) -> None:
+    """Move a staged upload onto the shelf, across filesystems if need be.
+
+    `os.replace` is the atomic choice and it is what this was — but it needs
+    both paths on one filesystem, and in the container they are two: the
+    staging directory (`/app/temp`) lives in the image's own layer while the
+    books directory (`/app/books`) is a bind mount. Every upload died with
+    `Invalid cross-device link` and a 500 on the one step the library depends
+    on — found by smoke-testing the 2.0.0 image, invisible on a host where the
+    two are the same directory tree.
+
+    A cross-device move therefore copies into a `.part` file *beside the
+    target* and renames that into place: atomic again, on the filesystem that
+    matters, and it overwrites an existing book on a re-upload exactly as
+    `os.replace` did. The staged file itself is removed by the upload's own
+    `finally`, which owns its lifetime.
+    """
+    try:
+        os.replace(source, target)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+
+    staging = target.with_name(f"{target.name}.part")
+    try:
+        shutil.copyfile(source, staging)
+        os.replace(staging, target)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
 # -- delete ---------------------------------------------------------------

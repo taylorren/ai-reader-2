@@ -56,6 +56,44 @@ def test_upload_lists_metadata_in_one_step(isolated_client, isolated, db):
     assert "words" in page.text
 
 
+def test_an_upload_survives_a_cross_filesystem_move(isolated_client, isolated,
+                                                    monkeypatch):
+    """The staging directory and the books directory need not be one filesystem.
+
+    In the container they are not: `/app/temp` sits in the image's own layer and
+    `/app/books` is a bind mount. `os.replace` needs one filesystem, so every
+    upload failed with `Invalid cross-device link` — a 500 on the one step the
+    library depends on (found by smoke-testing the 2.0.0 image). The move now
+    falls back to a copy staged *beside* the book and renamed into place, so the
+    book still appears atomically and nothing extra is left in its folder.
+    """
+    import errno
+    import os
+
+    from routers import library
+
+    real_replace = os.replace
+    crossings: list[str] = []
+
+    def cross_device(source, target):
+        if str(source).endswith(".epub"):      # the staged upload, not the .part
+            crossings.append(str(source))
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(library.os, "replace", cross_device)
+
+    response = upload(isolated_client, write_epub(isolated / "fixture.epub"))
+    assert response.status_code == 200, response.text
+    assert response.json()["slug"] == "Fixture Book"
+    assert len(crossings) == 1, "the cross-device path was not the one exercised"
+
+    folder = isolated / "books" / "Fixture Book"
+    assert (folder / "Fixture Book.epub").exists()
+    # The book, and nothing else: the .part file did not survive the rename.
+    assert sorted(p.name for p in folder.iterdir()) == ["Fixture Book.epub"]
+
+
 def test_reupload_of_the_same_book_keeps_its_identity(isolated_client, isolated, db):
     slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
 
