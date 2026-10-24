@@ -23,9 +23,10 @@ browser renders it.
 
 **Carried over as concepts (reimplemented, not copied):** library grouping and
 pinyin sorting · word-count and reading-time estimates · three highlight kinds
-(fact-check, discussion, comment) · AI fact-check / discussion / summarize /
-comment · progress persistence · Markdown sanitisation · provider override ·
-Docker and systemd packaging.
+(fact-check, discussion, comment) · the selection menu that produces them and
+copies the selection (解释说明 / 深入讨论 / 个人笔记 / 复制文本) · AI fact-check /
+discussion / summarize / comment · progress persistence · Markdown sanitisation
+· provider override · Docker and systemd packaging.
 
 **Never carried over:** `reader3.py` · the ebooklib nav monkey-patch ·
 `clean_html_content` · `extract_plain_text` · `rewrite_chapter_image_paths` ·
@@ -58,8 +59,10 @@ the client-side link-modal fetch-and-graft.
 delete) · reader (TOC, prev/next, keyboard) · the book's own files served at
 their own paths · footnotes and internal links · highlights · AI panel (local
 and cloud Ollama, interactive discussion, summarise) · progress · highlights
-view and Markdown export · settings. **Not started: Docker and systemd
-packaging** — P5, below.
+view and Markdown export · settings · **Docker packaging** (P5, in part: the
+`Dockerfile`, `.dockerignore` and `compose.yaml` at the repo root, published as
+`taylorren/epub-ai-reader`). **Not started: systemd packaging, and deleting the
+old world** — P5, below.
 
 **Out (deferred, but named):** full-text search inside a book (epubx's
 `plain_text` makes this cheap later) · multi-user and auth · annotation sync ·
@@ -204,7 +207,12 @@ Recommendation: **git dependency on a tag** once epubx is tagged.
 ```
 ai-reader-2/
 ├── SPEC.md               # this document
+├── PITFALLS.md           # the bugs only the deployment produced, and their pins
 ├── pyproject.toml        # deps; epubx is the only EPUB dependency
+├── Dockerfile            # the image: uid 1000, /app/books, /data, port 8123
+├── .dockerignore         # the build context: no books, no database, no secrets
+├── compose.yaml          # the same run as a file
+├── LICENSE               # MIT; it travels in the image
 ├── server.py             # FastAPI app, router registration, .env loading
 ├── booksource.py         # THE ADAPTER: the only module that imports epubx
 ├── database.py           # SQLite: books, highlights, ai_analyses, progress
@@ -240,7 +248,7 @@ adapter is right, replacing epubx later touches one module.
 | **P2** | Rendering, TOC, prev/next | A real book renders from its own files — no image rewriting, no `spine_map`, no `DOMParser` grafting |
 | **P3** | Footnotes from edges | A footnote opens without fetching a rendered page |
 | **P4** | Highlights, AI, progress on the new DOM | Create/edit/delete a highlight, run an analysis, resume position — all survive restart |
-| **P5** | Delete the old world; docs, Docker, systemd — **not started** | Zero `book.pkl` anywhere; no ebooklib or bs4 in `pyproject.toml` |
+| **P5** | Delete the old world; docs, Docker, systemd — **Docker landed** (`Dockerfile`, `.dockerignore`, `compose.yaml`, the published image); systemd and the old world outstanding | Zero `book.pkl` anywhere; no ebooklib or bs4 in `pyproject.toml` |
 
 Each phase is independently shippable and verifiable.
 

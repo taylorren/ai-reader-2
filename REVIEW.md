@@ -2129,4 +2129,44 @@ out — use a longer timeout for the experiment.
 **Independent:** P3-3 … P3-13 are one-line fixes that can ride along with any batch; T1 landed
 (class guard, Node module tests, stub-DOM flows and the Playwright smoke) and P3-14 landed with it
 (the router split), so **every item in this file is applied**. What is left is not a finding: the
-SPEC's P5 milestone — Docker and systemd packaging, and deleting the old world.
+SPEC's P5 milestone — systemd packaging, and deleting the old world. Its Docker half has since
+landed, and running it found the two bugs recorded at the end of this file.
+
+---
+
+## After the review — two bugs found by running the thing
+
+Neither is a review item: both were found by using the app the way it is actually deployed — in the
+container, and over the LAN — which is exactly what the review's own findings could not do.
+
+### The 2.0.0 image could not accept an upload (2026-10-24)
+
+Smoke-testing the image, the first upload answered 500:
+`OSError: [Errno 18] Invalid cross-device link: '/app/temp/…epub' -> '/app/books/…epub'`. The
+staging directory and the books directory are two filesystems in the container (`/app/temp` lives
+in the image layer, `/app/books` is a bind mount), and `os.replace` needs one — invisible on a host,
+where both are the same directory tree. `routers/library.py` now stages the copy beside the book
+and renames it into place, atomic again on the destination
+(`tests/test_library.py::test_an_upload_survives_a_cross_filesystem_move`).
+
+### 复制文本 copied nothing on the deployment that exists (2026-10-24)
+
+Reported by the reader, on the real thing: select text, choose 复制文本, nothing copied — no toast,
+no error. The cause is a secure-context rule. `navigator.clipboard` exists only in a secure context
+(https, or localhost), and this reader is served over plain http on a LAN address; measured on the
+deployment host, `http://192.168.150.60` reports `isSecureContext=false` and
+`typeof navigator.clipboard='undefined'`, while `http://127.0.0.1` reports `object`. The action
+called it unguarded, so the click raised `TypeError: navigator.clipboard is undefined` inside an
+`async` handler — a rejected promise, nothing on screen, and the reader told nothing. The reference
+implementation had a textarea-and-`execCommand` fallback for precisely this; the port dropped it.
+
+`panel.js` now tries the Clipboard API and falls back, and returns whether the copy happened, so a
+failure is reported (`复制失败，请手动复制`) instead of a copy that never took place. Pinned twice:
+`tests/js/panel-flow.test.js` (four cases — the API, an absent API, a refused API, and a copy that
+did not happen) and `tests/test_browser.py::test_the_copy_action_copies_where_the_clipboard_api_is_absent`,
+which makes a real selection in a real browser with the property removed.
+
+**Why the suite missed it:** every test served the app from `127.0.0.1`, which *is* a secure
+context. The stub DOM supplied a `navigator.clipboard` no LAN browser has. Both gaps are closed:
+the stub can now model an insecure origin (`clipboard: false`) and a refused write
+(`clipboard: "denied"`).
