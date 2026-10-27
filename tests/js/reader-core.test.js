@@ -23,7 +23,7 @@ test("the module exposes the helpers the shell relies on", () => {
                         "offsetToPoint", "textNodes", "textOffset",
                         "findTextRange", "contextAround", "findBlockForText",
                         "blockElement", "firstVisibleBlockId", "fileURL",
-                        "clampSize", "tocKey"]) {
+                        "clampSize", "tocKey", "findLatexSpans", "mathText"]) {
         assert.equal(typeof core[name], "function", name);
     }
 });
@@ -355,5 +355,133 @@ test("tocKey identifies a TOC node by href, anchor and label", () => {
     // the shape the derived outline produces.
     assert.notEqual(core.tocKey({ href: "ch1.xhtml", anchor: "sec-a" }),
                     core.tocKey({ href: "ch1.xhtml", anchor: "sec-b" }));
+});
+
+
+/* ---- LaTeX: what is math, and what the document says once it is drawn ----
+ *
+ * The pass that draws a book's LaTeX lives in reader.js and needs a browser
+ * (tests/test_browser.py). These are the two halves of it that do not: which
+ * spans are math at all — where a book about prices must stay a book about
+ * prices — and what a paragraph *says* after a formula has been drawn into it,
+ * which is what keeps every block lookup in this file working.
+ */
+
+test("findLatexSpans finds the delimiters a book writes math in", () => {
+    const text = "Inline math is $x = \\frac{a}{b}$, and that is that.";
+    const spans = core.findLatexSpans(text);
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].tex, "x = \\frac{a}{b}");
+    assert.equal(spans[0].display, false);
+    assert.equal(spans[0].source, "$x = \\frac{a}{b}$");
+    // The offsets are the text's own, and they select the source exactly.
+    assert.equal(text.slice(spans[0].start, spans[0].end), spans[0].source);
+});
+
+test("findLatexSpans knows the display forms and the bracket spellings", () => {
+    for (const [text, source, tex] of [
+        ["before $$x^2$$ after", "$$x^2$$", "x^2"],
+        ["before \\[x^2\\] after", "\\[x^2\\]", "x^2"],
+    ]) {
+        const [span] = core.findLatexSpans(text);
+        assert.equal(span.source, source);
+        assert.equal(span.tex, tex);
+        assert.equal(span.display, true);
+    }
+    const [inline] = core.findLatexSpans("before \\(x^2\\) after");
+    assert.equal(inline.source, "\\(x^2\\)");
+    assert.equal(inline.display, false);
+});
+
+test("findLatexSpans leaves a price alone", () => {
+    // The two heuristics every auto-renderer carries: no whitespace after the
+    // opening `$`, none before the closing one.
+    assert.deepEqual(core.findLatexSpans("It cost $5 and then $10."), []);
+    assert.deepEqual(core.findLatexSpans("$5.00"), []);
+    assert.deepEqual(core.findLatexSpans("a single $ sign"), []);
+    // An escaped dollar is a literal, and so is one inside a formula.
+    assert.deepEqual(core.findLatexSpans("\\$5 is a price"), []);
+    assert.equal(core.findLatexSpans("$a \\$ b$")[0].tex, "a \\$ b");
+    // A rejected opener costs one character, not the rest of the paragraph: a
+    // real formula after it is still found.
+    const spans = core.findLatexSpans("$5 and $10, but $x^2$ is math.");
+    assert.equal(spans.length, 1);
+    assert.equal(spans[0].source, "$x^2$");
+});
+
+test("findLatexSpans takes every formula in one run of text, in order", () => {
+    const spans = core.findLatexSpans("$a$ then $$b$$ then \\(c\\)");
+    assert.deepEqual(spans.map((span) => span.source), ["$a$", "$$b$$", "\\(c\\)"]);
+    // Nothing to find, and nothing to crash on.
+    assert.deepEqual(core.findLatexSpans("plain prose"), []);
+    assert.deepEqual(core.findLatexSpans(""), []);
+    assert.deepEqual(core.findLatexSpans(null), []);
+    // Empty spans and multi-line ones are not formulas a renderer can be handed.
+    assert.deepEqual(core.findLatexSpans("$$$$"), []);
+    assert.deepEqual(core.findLatexSpans("$a\nb$"), []);
+});
+
+// A node tree for `mathText`, which reads nodeType/nodeValue/childNodes and the
+// two attribute methods — and nothing else.
+const textNode = (value) => ({ nodeType: 3, nodeValue: value });
+const element = (attributes, ...children) => ({
+    nodeType: 1, childNodes: children,
+    hasAttribute: (name) => Object.prototype.hasOwnProperty.call(attributes, name),
+    getAttribute: (name) => attributes[name],
+});
+
+test("mathText reads a drawn formula as the source the book wrote", () => {
+    const drawn = element({ "data-reader-math": "", "data-tex": "x^2",
+                            "data-source": "$x^2$" },
+                          element({}, textNode("x2")));
+    const paragraph = element({}, textNode("Area is "), drawn,
+                              textNode(", roughly."));
+    assert.equal(core.mathText(paragraph), "Area is $x^2$, roughly.");
+    // A drawn formula with no source to fall back on contributes nothing, rather
+    // than leaking the characters it draws.
+    const orphan = element({ "data-reader-math": "" },
+                           element({}, textNode("x2")));
+    assert.equal(core.mathText(element({}, textNode("Area is "), orphan)), "Area is ");
+    // Text nodes, nothing, and a plain element all answer sensibly.
+    assert.equal(core.mathText(textNode("plain")), "plain");
+    assert.equal(core.mathText(null), "");
+    assert.equal(core.mathText(undefined), "");
+    // A stand-in node that cannot be walked is read as its text — the shape the
+    // stub documents in this suite are made of.
+    assert.equal(core.mathText({ textContent: "no children here" }),
+                 "no children here");
+});
+
+test("mathText projects a copied selection, not only a whole block", () => {
+    // `range.cloneContents()` gives a fragment: nodeType 11, children, and no
+    // attributes of its own — the shape 复制文本 hands to `mathText` so a copied
+    // formula arrives as its source rather than as the characters it drew.
+    const fragment = {
+        nodeType: 11,
+        childNodes: [
+            textNode("Inline math is "),
+            element({ "data-reader-math": "", "data-source": "$x = \\frac{a}{b}$" },
+                    element({}, textNode("x=ab"))),
+            textNode(", and that is that."),
+        ],
+    };
+    assert.equal(core.mathText(fragment),
+                 "Inline math is $x = \\frac{a}{b}$, and that is that.");
+});
+
+test("mathText is what keeps a block matchable after the math pass", () => {
+    const paragraph = element({}, textNode("Inline math is "),
+        element({ "data-reader-math": "", "data-tex": "x = \\frac{a}{b}",
+                  "data-source": "$x = \\frac{a}{b}$" },
+                element({}, textNode("x=ab"))),
+        textNode(", and that is that."));
+    // The two readings differ, which is the whole reason `mathText` exists: the
+    // document's own text is the drawn characters, and what the library
+    // extracted — what `blockElement` compares against — is the source.
+    assert.notEqual(core.normalizeText(paragraph.childNodes.map(
+        (child) => child.textContent || "").join("")),
+        core.normalizeText(core.mathText(paragraph)));
+    assert.equal(core.normalizeText(core.mathText(paragraph)),
+                 "Inline math is $x = \\frac{a}{b}$, and that is that.");
 });
 

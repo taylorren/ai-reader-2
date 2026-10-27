@@ -208,14 +208,16 @@ window.ReaderCore = (function () {
 
     // The element in the frame's own document that carries the block's text.
     // Compared normalised, because the served document's whitespace is the
-    // book's, not the extractor's.
+    // book's, not the extractor's — and through `mathText`, so a formula the
+    // shell rendered is read as the source it was written as rather than as the
+    // characters it draws.
     function blockElement(doc, block) {
         const target = normalizeText(block.text);
         if (!target) return null;
         const candidates = doc.querySelectorAll(
             "p, h1, h2, h3, h4, h5, h6, blockquote, pre, dt, dd, li, td");
         for (const node of candidates) {
-            if (normalizeText(node.textContent) === target) return node;
+            if (normalizeText(mathText(node)) === target) return node;
         }
         return null;
     }
@@ -242,10 +244,110 @@ window.ReaderCore = (function () {
             // `<=`: a block whose bottom edge is exactly on the line is
             // entirely above it, and nothing of it is on screen.
             if (node.getBoundingClientRect().bottom <= line) continue;
-            const id = ids.get(normalizeText(node.textContent));
+            const id = ids.get(normalizeText(mathText(node)));
             if (id) return id;
         }
         return null;
+    }
+
+    /* ---- LaTeX: what to render, and what the document then says ----
+
+    A book's formulas are often LaTeX, and LaTeX is only text: nothing renders
+    it by itself, and the reader's frame is sandboxed without `allow-scripts`,
+    so a MathJax a book ships can never run (SPEC.md, the trade-off this
+    closes). The shell renders it instead — reader.js, `renderMathInFrame` —
+    and these are the two halves of that worth testing without a browser: which
+    spans are math at all, and what the document *says* once they are drawn. */
+
+    // The delimiters a book writes math in. `$$` before `$`, so the display
+    // form wins at the same offset; the bracket forms are unambiguous.
+    const LATEX_DELIMITERS = [
+        { open: "$$", close: "$$", display: true },
+        { open: "\\[", close: "\\]", display: true },
+        { open: "\\(", close: "\\)", display: false },
+        { open: "$", close: "$", display: false },
+    ];
+
+    // The LaTeX spans in a run of text: `{start, end, tex, display, source}` in
+    // that text's own offsets. `end` is exclusive and includes the closing
+    // delimiter; `source` is the span exactly as the book wrote it, which is
+    // what `mathText` hands back to the block lookups below.
+    //
+    // The bare `$` carries the two heuristics every auto-renderer has, or a book
+    // about prices becomes a book of mathematics: no whitespace after the
+    // opening `$` and none before the closing one, so `$5 and $10` is prose.
+    // A span that fails any check costs one character, never the rest of the
+    // paragraph — a real formula after a rejected opener is still found.
+    function findLatexSpans(text) {
+        const source = String(text == null ? "" : text);
+        const spans = [];
+        for (let at = 0; at < source.length; at++) {
+            // Cheap pre-filter: only these two characters can open a span.
+            if (source[at] !== "$" && source[at] !== "\\") continue;
+            if (at > 0 && source[at - 1] === "\\") continue;   // `\$5` is a price
+            const delimiter = LATEX_DELIMITERS.find(
+                (candidate) => source.startsWith(candidate.open, at));
+            if (!delimiter) continue;
+            const bare = delimiter.open === "$";
+            const after = source[at + delimiter.open.length];
+            if (after === undefined) continue;
+            if (bare && (/\s/.test(after) || after === "$")) continue;
+            let end = source.indexOf(delimiter.close, at + delimiter.open.length);
+            while (end > 0 && source[end - 1] === "\\") {
+                end = source.indexOf(delimiter.close, end + 1);   // `\$` inside
+            }
+            if (end < 0) continue;
+            const before = source[end - 1];
+            if (bare && (/\s/.test(before) || before === "$")) continue;
+            const tex = source.slice(at + delimiter.open.length, end);
+            if (!tex.trim() || tex.includes("\n")) continue;
+            const span = {
+                start: at, end: end + delimiter.close.length, tex,
+                display: delimiter.display,
+                source: source.slice(at, end + delimiter.close.length),
+            };
+            spans.push(span);
+            at = span.end - 1;   // the loop's own step moves past the span
+        }
+        return spans;
+    }
+
+    // What a node *says*, with every rendered formula put back to the source the
+    // book wrote. Converting a formula replaces its source with the MathML the
+    // browser draws, and every lookup in this file compares text against what
+    // the library extracted — so without this a paragraph holding a formula
+    // stops matching the moment it is converted. Measured on the math test book:
+    // matched before the pass, null after it, matched again with this. The pass
+    // writes `data-source` on each converted span for exactly this.
+    //
+    // A `DocumentFragment` works as well as an element — that is what a copied
+    // selection is (`range.cloneContents()`), which is how 复制文本 hands a
+    // reader the formula rather than the characters it was drawn from.
+    function mathText(node) {
+        if (!node) return "";
+        let text = "";
+        const walk = (current) => {
+            if (current.nodeType === 3) {          // a text node
+                text += current.nodeValue;
+                return;
+            }
+            // A node with no children is a leaf: a stand-in such as the stub
+            // documents in tests/js carry only their text, and a real leaf has
+            // no converted formula inside it to put back.
+            if (!current.childNodes) {
+                text += current.textContent || "";
+                return;
+            }
+            if (typeof current.hasAttribute === "function"
+                && current.hasAttribute("data-reader-math")) {
+                const source = current.getAttribute("data-source");
+                if (source != null) text += source;
+                return;
+            }
+            for (const child of current.childNodes) walk(child);
+        };
+        walk(node);
+        return text;
     }
 
     // A book-internal path and anchor → the URL the frame loads. Each path
@@ -287,6 +389,8 @@ window.ReaderCore = (function () {
         findBlockForText,
         blockElement,
         firstVisibleBlockId,
+        findLatexSpans,
+        mathText,
         fileURL,
         clampSize,
         tocKey,

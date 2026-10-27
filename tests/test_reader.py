@@ -20,8 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixtures import write_drm_epub, write_epub, write_sectioned_epub  # noqa: E402
 
 # Ids a script looks up that the shell cannot carry because the script creates
-# them itself.
-SCRIPT_MADE_IDS = {"comment-input"}
+# them itself. `reader-math-style` is created in the *frame's* document — it is
+# the converter's stylesheet — and the paper sheet's own `reader-style` escapes
+# this check only because it is written as a constant rather than a literal.
+SCRIPT_MADE_IDS = {"comment-input", "reader-math-style"}
 
 # Classes a script names that its page's stylesheet deliberately does not
 # define, each with the reason. Adding one here is a decision; the guard fails

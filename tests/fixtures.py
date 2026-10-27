@@ -508,6 +508,64 @@ def write_scripted_epub(path) -> Path:
     return Path(path)
 
 
+# A chapter of LaTeX — the shape a math-heavy book ships, and the one the shell
+# draws itself. Four formulas (two inline in the dollar spelling, one display in
+# the bracket spelling, one beside a macro no renderer knows), three prices that
+# must *not* be read as math, and the book's own script, which must still never
+# run. Every assertion in `test_browser.py::test_the_shell_draws_a_books_latex`
+# counts one of those.
+LATEX_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>LaTeX</title>
+<script>document.documentElement.setAttribute("data-book-script-ran", "1");</script>
+</head>
+<body>
+  <h1 id="top">LaTeX</h1>
+  <p>Inline math is $x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$, and it sits in a
+     sentence long enough that the chapter is plainly prose rather than a page of
+     pictures, which is what the library checks before it will render a book at
+     all.</p>
+  <p>A display formula is written like this:
+     \\[ \\int_0^1 x^2 \\, dx = \\tfrac{1}{3} \\] and the book expects it pulled
+     out and centred on a line of its own.</p>
+  <p>Prices are written like this: $5 for the paperback, $10 for the hardback,
+     and $30 for the set — none of which is mathematics, so none of it may be
+     drawn as a formula.</p>
+  <p>A macro nobody knows, $\\undefinedmacro{x}$, must not take the sentence
+     down with it, and $a^2 + b^2 = c^2$ beside it still draws.</p>
+</body>
+</html>
+"""
+
+LATEX_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>LaTeX Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:latex-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="latex.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+
+def write_latex_epub(path) -> Path:
+    """A book whose formulas are LaTeX — what the shell's math pass is for."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", LATEX_OPF)
+        zf.writestr("OEBPS/latex.xhtml", LATEX_CHAPTER)
+    return Path(path)
+
+
 # A book whose first paragraph repeats a sentence: the shape that made
 # `block.text.indexOf(selection)` answer "the first one" whatever the reader had
 # selected, so a mark made on the second sentence was painted on the first

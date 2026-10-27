@@ -12,7 +12,7 @@ window.ReaderPanel = (function () {
     // The pure helpers, shared with reader.js and unit-tested in Node
     // (static/js/reader-core.js, REVIEW T1).
     const { escapeHtml, findTextRange, contextAround, textNodes, offsetToPoint,
-            findBlockForText, blockElement } = window.ReaderCore;
+            findBlockForText, blockElement, mathText } = window.ReaderCore;
 
     const KIND_LABELS = {
         fact_check: "解释说明",
@@ -550,11 +550,28 @@ window.ReaderPanel = (function () {
         }
     }
 
+    // What 复制文本 puts on the clipboard: the selection as the *book* wrote it,
+    // with every formula the shell converted read back as its source. A reader
+    // who copies a formula wants `$x = \frac{a}{b}$` — something to paste into
+    // their own document — and not the characters the browser drew from it,
+    // which come out spaced and in mathematical alphanumerics. Falls back to the
+    // captured text when the frame's selection is gone: clicking the menu item
+    // can clear it.
+    function copyableText(selection) {
+        const doc = frameEl().contentDocument;
+        const live = doc && doc.defaultView ? doc.defaultView.getSelection() : null;
+        if (live && live.rangeCount && !live.isCollapsed) {
+            const projected = mathText(live.getRangeAt(0).cloneContents());
+            if (projected.trim()) return projected;
+        }
+        return selection.text;
+    }
+
     async function handleAction(action) {
         const selection = state.selection;
         if (action === "copy") {
             if (!selection) { toast("请先选中文字"); return; }
-            const copied = await copyText(selection.text);
+            const copied = await copyText(copyableText(selection));
             if (copied) toast("已复制到剪贴板");
             else toast("复制失败，请手动复制", "error");
             return;

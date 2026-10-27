@@ -5,8 +5,8 @@
 
 // The pure helpers live in reader-core.js (loaded first), shared with
 // panel.js and unit-tested in Node — REVIEW T1.
-const { clampSize, fileURL, tocKey, blockElement,
-        firstVisibleBlockId } = window.ReaderCore;
+const { clampSize, fileURL, tocKey, blockElement, firstVisibleBlockId,
+        findLatexSpans } = window.ReaderCore;
 
 const app = document.getElementById("reader-app");
 const frame = document.getElementById("chapter-frame");
@@ -417,12 +417,13 @@ function applyFrameStyle() {
     }
     if (state.mode === "book") {
         // The publisher's design, untouched: no paper stylesheet — but the
-        // painted highlights, the resume rule and the image cursor still need
-        // to be there.
-        style.textContent = IMAGE_CSS + HIGHLIGHT_CSS + RESUME_CSS;
+        // painted highlights, the resume rule, the image cursor and the drawn
+        // formulas still need to be there.
+        style.textContent = IMAGE_CSS + HIGHLIGHT_CSS + RESUME_CSS + MATH_CSS;
         return;
     }
-    style.textContent = framePaperCSS() + IMAGE_CSS + HIGHLIGHT_CSS + RESUME_CSS;
+    style.textContent = framePaperCSS() + IMAGE_CSS + HIGHLIGHT_CSS + RESUME_CSS
+        + MATH_CSS;
 }
 
 function applyTheme() {
@@ -1126,12 +1127,194 @@ function frameChapterIndex() {
     }
 }
 
+/* ---- Math: the shell renders the book's LaTeX ----
+
+A book's formulas are usually LaTeX, and LaTeX is only text — nothing draws it
+by itself. The reader serves the book's own document in a frame marked
+`sandbox="allow-same-origin"`, with no `allow-scripts`, so a MathJax the book
+ships can never run: SPEC.md named that as an open trade-off, and this is the
+other way through it. The shell converts the formulas instead, with a converter
+of its own, into the frame's own document — the same reach that injects the
+paper stylesheet and paints a highlight. The book's file is never written to,
+and the book's own scripts still never run.
+
+**The output is MathML, not a picture of math.** Temml turns the book's LaTeX
+into the same MathML the browser already renders natively (a book that ships
+MathML needs none of this — see chapter 1 of the math test book), so a formula
+stays *text*: it can be selected, found by find-in-page and read by assistive
+technology, it follows the reader's font size, and it needs no font files of its
+own. The alternative — MathJax drawing SVG — is what shipped first, and it is
+what this replaced: 2.1 MB against 168 KB, and glyph outlines against text.
+
+Rendering changes what the document *says*, so each drawn span carries the
+source it was written as (`data-source`) beside the formula (`data-tex`), and
+`ReaderCore.mathText` reads that back for every block lookup — and, since a
+reader who selects a formula wants the formula rather than its rendering, for
+the text 复制文本 puts on the clipboard. Without it a paragraph holding a
+formula stops matching the text the library extracted: measured on the math
+test book, matched before the pass, null after it, matched again with it.
+
+A formula this converter cannot read is left exactly as the book wrote it. The
+failure is marked (`data-math-error`, the parser's own message) rather than
+swallowed, and the sentence around it is untouched — the chapter looks as it did
+before any of this existed, which is the one failure a reader can still act on. */
+
+const MATH_SCRIPT = "/static/vendor/temml/temml.min.js";
+
+// Temml's own stylesheet, served from its own directory: it sets the math font
+// stack and makes display math a block. Loaded into the frame as a `<link>`
+// rather than inlined, because its `url(Temml.woff2)` must resolve against the
+// stylesheet's own path, not the book's.
+const MATH_STYLESHEET = "/static/vendor/temml/Temml-Local.css";
+
+// Elements whose text is never a formula: code and pre are where a `$` is
+// literal, and MathML is already math.
+const MATH_SKIP_TAGS = new Set(["PRE", "CODE", "SCRIPT", "STYLE", "MATH",
+                                "TEXTAREA"]);
+
+// Injected into the frame in both modes, like the highlight colours and the
+// resume rule. Temml's own stylesheet rides along as a `<link>` (see
+// `applyMathStylesheet`); what is here is the reader's own dressing: a display
+// formula is a centred block of its own, and one too wide for the column
+// scrolls rather than widening the page.
+const MATH_CSS = `
+span[data-reader-math] { display: inline; }
+span[data-reader-math][data-display] {
+  display: block; text-align: center; margin: 1.1em 0; overflow-x: auto;
+}
+span[data-reader-math] math { max-width: 100%; }
+`;
+
+let mathPromise = null;
+
+// The cache-busting the templates put on the shell's own scripts, taken from
+// this script's own URL rather than hard-coded.
+function assetQuery() {
+    const shellScript = document.querySelector("script[src*='/static/js/reader.js']");
+    const source = shellScript ? shellScript.getAttribute("src") || "" : "";
+    return source.indexOf("?") >= 0 ? source.slice(source.indexOf("?")) : "";
+}
+
+// The converter is fetched the first time a chapter turns out to carry LaTeX,
+// and never for a library of prose: 168 KB is not a page-load cost a reader
+// should pay for a book with no formulas in it.
+function ensureMath() {
+    if (mathPromise) return mathPromise;
+    mathPromise = new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = MATH_SCRIPT + assetQuery();
+        script.onload = () => resolve(typeof window.temml !== "undefined");
+        script.onerror = () => resolve(false);   // no converter: the source stays
+        document.head.appendChild(script);
+    });
+    return mathPromise;
+}
+
+// Temml's stylesheet in the frame's head, once per document. It is a `<link>`
+// and not inlined because the font it declares resolves against the
+// stylesheet's own path; it is added with the first formula, so a chapter
+// without math never asks for it.
+function applyMathStylesheet(doc) {
+    if (doc.getElementById("reader-math-style")) return;
+    const link = doc.createElement("link");
+    link.id = "reader-math-style";
+    link.rel = "stylesheet";
+    link.href = MATH_STYLESHEET + assetQuery();
+    (doc.head || doc.documentElement).appendChild(link);
+}
+
+// Text nodes whose parent chain forbids rendering.
+function mathSkipped(node) {
+    for (let el = node.parentElement; el; el = el.parentElement) {
+        if (MATH_SKIP_TAGS.has(el.tagName)) return true;
+        if (el.hasAttribute("data-reader-math")) return true;
+    }
+    return false;
+}
+
+// Draw the frame's LaTeX. Called on every frame load; an ordinary chapter costs
+// one walk of its text nodes and no network at all. A document that cannot be
+// walked — the stub documents in tests/js, or a frame that went away — has no
+// math to draw, and returns here rather than breaking the rest of the frame's
+// wiring: footnotes, highlights and the reading position are wired after this.
+function renderMathInFrame() {
+    const doc = frameDocument();
+    if (!doc || !doc.body || typeof doc.createTreeWalker !== "function"
+        || typeof NodeFilter === "undefined") {
+        return;
+    }
+    const pending = [];
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+        const value = node.nodeValue;
+        if (!value || (value.indexOf("$") < 0 && value.indexOf("\\") < 0)) continue;
+        if (mathSkipped(node)) continue;
+        const spans = findLatexSpans(value);
+        if (spans.length) pending.push({ node, spans });
+    }
+    if (!pending.length) return;
+    ensureMath().then((ready) => {
+        if (!ready) return;
+        applyMathStylesheet(doc);
+        drawMath(doc, pending);
+    }).catch(() => {});   // a converter that fails never breaks the chapter
+}
+
+function drawMath(doc, pending) {
+    for (const { node, spans } of pending) {
+        if (!doc.contains(node)) continue;   // the reader turned the chapter
+        // Last span first: splitting at a later offset leaves the earlier ones
+        // valid, and `findLatexSpans` returns the spans in order.
+        for (let i = spans.length - 1; i >= 0; i--) {
+            const span = spans[i];
+            const holder = doc.createElement("span");
+            holder.setAttribute("data-reader-math", "");
+            holder.setAttribute("data-tex", span.tex);
+            holder.setAttribute("data-source", span.source);
+            if (span.display) holder.setAttribute("data-display", "block");
+            try {
+                // MathML, not a picture of it: the frame's document parses
+                // `<math>` natively, so the formula is still text.
+                holder.innerHTML = window.temml.renderToString(span.tex,
+                    { displayMode: span.display, throwOnError: true });
+            } catch (error) {
+                // A formula this converter cannot read: the book's own text
+                // stays where it was, and the reason is left in the DOM for a
+                // developer rather than swallowed.
+                holder.textContent = span.source;
+                holder.setAttribute("data-math-error",
+                                    String(error.message || error).slice(0, 200));
+            }
+            const tail = node.splitText(span.start);
+            tail.splitText(span.end - span.start);
+            tail.parentNode.replaceChild(holder, tail);
+        }
+    }
+}
+
+
+
+// The document this wiring was last run for. A `load` event always brings a new
+// one, so a chapter is wired exactly once — whether it arrives through the
+// listener below or through the check at init, which exists because that
+// listener can be missed (see there).
+let wiredDocument = null;
+
 // In-book links navigate the frame natively; follow along so the position
 // and the TOC highlight stay in step with what the reader is looking at.
-frame.addEventListener("load", () => {
+function onFrameLoad() {
+    const doc = frameDocument();
+    if (doc && doc === wiredDocument) return;
+    wiredDocument = doc;
     hidePopup();
     hideImagePopup();
     applyFrameStyle();
+    // Before the scroll is restored and the highlights are painted, so what the
+    // reader sees is the finished chapter rather than one that reflows under
+    // them a moment later. It fetches the converter only for a chapter that
+    // carries LaTeX, and does nothing at all otherwise.
+    renderMathInFrame();
     wireFrameScroll();
     // The frame — not the shell — is the truth about which chapter is on
     // screen: a footnote's 在注释处打开 or any cross-reference moves it without
@@ -1159,7 +1342,9 @@ frame.addEventListener("load", () => {
     pendingAnchor = null;
     syncTocHighlight();
     setTimeout(syncTocHighlight, 350);
-});
+}
+
+frame.addEventListener("load", onFrameLoad);
 
 /* ---- init ---- */
 
@@ -1178,6 +1363,20 @@ mark();
 wireMarkers();
 wireImages();
 loadEdges();
+// The rest of the frame's wiring belongs to `onFrameLoad` — the paper sheet,
+// the drawn math, the reading position, the saved highlights — and that
+// listener is missed in the very same race: a chapter small enough to finish
+// loading before these scripts ran (the frame sits above them in the document)
+// never fires a `load` this script can hear, and the chapter then reads
+// unstyled, unhighlighted, with its formulas still as source. Wiring is
+// guarded per document, so asking here cannot wire one chapter twice.
+function frameIsLoaded() {
+    const doc = frameDocument();
+    return Boolean(doc && doc.readyState === "complete" && doc.body
+                   && doc.body.childNodes.length);
+}
+
+if (frameIsLoaded()) onFrameLoad();
 // The scroll listeners are wired from the frame's `load` too, so a missed event
 // meant no progress was ever saved while scrolling — the same race as the resume
 // below, and the reason T1's browser smoke was flaky before this (the wiring is

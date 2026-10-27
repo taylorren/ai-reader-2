@@ -42,6 +42,7 @@ import httpx  # noqa: E402
 from fixtures import (  # noqa: E402
     write_epub,
     write_inline_epub,
+    write_latex_epub,
     write_long_epub,
     write_repeated_epub,
     write_scripted_epub,
@@ -725,3 +726,228 @@ def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
         assert stored_settings(base_url)["provider_override"] == "ollama_cloud"
     finally:
         page.close()
+
+# -- math: the shell draws a book's LaTeX -----------------------------------
+
+def test_the_shell_draws_a_books_latex(browser, base_url, isolated):
+    """A book of LaTeX: the shell converts it to MathML, and nothing else breaks.
+
+    Four things only a browser can show. That a formula arrives as *MathML* —
+    the same thing the browser already draws for a book that ships it, so the
+    formula stays text: selectable, searchable, and the same characters a reader
+    could copy. That the document still says what the library extracted —
+    `ReaderCore.mathText` reads each converted span back as its source, without
+    which `blockElement` stops finding the paragraph at all (measured before it
+    existed: matched, then null). That the two shapes which must not be
+    converted — a price, a macro the converter does not know — are left alone,
+    the second of them marked rather than swallowed. And that the book's own
+    script still never runs.
+    """
+    slug = upload_book(base_url, write_latex_epub(isolated / "latex.epub"))
+    blocks = chapter_payload(base_url, slug)["blocks"]
+    paragraph = next(block for block in blocks if "Inline math is" in block["text"])
+    assert "$x = \\frac" in paragraph["text"], "the stored text is the book's source"
+
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0", wait_until="load")
+        page.wait_for_selector("#chapter-frame")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("[data-reader-math]").first.wait_for(timeout=30000)
+        drawn = page.evaluate("""(stored) => {
+            const doc = document.querySelector('#chapter-frame').contentDocument;
+            const Core = window.ReaderCore;
+            const spans = [...doc.querySelectorAll('[data-reader-math]')];
+            const paragraph = (needle) => [...doc.querySelectorAll('p')]
+                .find((p) => p.textContent.includes(needle));
+            const prices = paragraph('paperback');
+            const macro = paragraph('nobody knows');
+            const prose = paragraph('Inline math is');
+            // What a reader can select over the formula. MathML is text, so
+            // this is a real selection rather than a picture of one.
+            const mathEl = prose.querySelector('math');
+            const range = doc.createRange();
+            range.selectNodeContents(mathEl);
+            const selection = doc.defaultView.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            const selected = selection.toString();
+            selection.removeAllRanges();
+            const failed = macro.querySelector('[data-reader-math][data-math-error]');
+            return {
+                spans: spans.length,
+                mathElements: doc.querySelectorAll('[data-reader-math] math').length,
+                mfracs: doc.querySelectorAll('[data-reader-math] mfrac').length,
+                displayMath: doc.querySelectorAll(
+                    '[data-reader-math][data-display] math').length,
+                formulaText: mathEl ? mathEl.textContent.replace(/\\s+/g, '') : null,
+                selectionOverFormula: selected.replace(/\\s+/g, ' ').trim(),
+                dollarsInText: (doc.body.innerText.match(/\\$/g) || []).length,
+                sources: spans.map((s) => s.getAttribute('data-source')),
+                rawTextHasSource: doc.body.textContent.includes('$x = \\\\frac'),
+                blockMatched: Boolean(Core.blockElement(doc, {text: stored})),
+                priceSpans: prices.querySelectorAll('[data-reader-math]').length,
+                pricesIntact: prices.textContent.includes('$5 for the paperback'),
+                macroSpans: macro.querySelectorAll('[data-reader-math]').length,
+                macroError: failed
+                    ? {source: failed.textContent,
+                       reason: failed.getAttribute('data-math-error')}
+                    : null,
+                bookScriptRan: doc.documentElement.hasAttribute('data-book-script-ran'),
+            };
+        }""", paragraph["text"])
+    finally:
+        page.close()
+
+    assert errors == []
+    assert drawn["spans"] == 4, "two inline, one display, one beside the unknown macro"
+    assert drawn["mathElements"] == 3, \
+        "three converted; the one the converter cannot read keeps the book's source"
+    assert drawn["mfracs"] >= 1
+    assert drawn["displayMath"] == 1
+    # Five dollar signs, not two: the three prices are prose, and the formula
+    # the converter could not read keeps the dollars the book wrote.
+    assert drawn["dollarsInText"] == 5
+    assert drawn["sources"][0] == "$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$"
+    assert drawn["sources"][1] == "\\[ \\int_0^1 x^2 \\, dx = \\tfrac{1}{3} \\]"
+    # The formula is text, and a reader can select it — the reason MathML is the
+    # output rather than a picture of the formula.
+    assert "4ac" in drawn["formulaText"]
+    assert drawn["selectionOverFormula"], "a formula in the frame is selectable"
+    # The projection, both halves of it: the source is gone from the document's
+    # own text, and the block lookup still matches anyway.
+    assert drawn["rawTextHasSource"] is False
+    assert drawn["blockMatched"] is True
+    # The hazards, in the same chapter: the prices are untouched, and the macro
+    # nobody knows keeps the book's own source with the reason beside it.
+    assert drawn["priceSpans"] == 0
+    assert drawn["pricesIntact"] is True
+    assert drawn["macroSpans"] == 2, "the formula beside it still converts"
+    assert drawn["macroError"]["source"] == "$\\undefinedmacro{x}$"
+    assert "Unsupported function name" in drawn["macroError"]["reason"]
+    # The book's own script still never runs.
+    assert drawn["bookScriptRan"] is False
+
+
+def test_copying_a_selection_carries_the_formula_source(browser, base_url, isolated):
+    """复制文本 on a formula: the reader gets the LaTeX, not the rendering.
+
+    The point of converting a book's LaTeX to MathML rather than to a picture is
+    that a formula stays text a reader can select — but what the browser hands
+    back for a selection over MathML is its own extraction, spaced and in
+    mathematical alphanumerics (`𝑥 = − 𝑏 ± …`), which is nothing anyone can
+    paste into a document. The book's source is what a reader wants, and the
+    shell keeps it (`data-source`), so the copy action reads the selection back
+    through `ReaderCore.mathText`. Observed where it lands: the text the fallback
+    hands to the document's own copy command.
+    """
+    slug = upload_book(base_url, write_latex_epub(isolated / "latex.epub"))
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("[data-reader-math]").first.wait_for(timeout=30000)
+
+        # The LAN deployment's shape — plain http has no Clipboard API — and the
+        # copy observed where it lands.
+        page.evaluate(
+            """() => {
+                Object.defineProperty(navigator, 'clipboard', { value: undefined });
+                window.__copied = [];
+                const real = document.execCommand.bind(document);
+                document.execCommand = (command) => {
+                    if (command === 'copy') {
+                        window.__copied.push(document.getSelection().toString());
+                    }
+                    return real(command);
+                };
+            }""")
+
+        # A real selection over a paragraph that holds a formula, and the mouseup
+        # that opens the menu over it.
+        frame.locator("p").filter(has_text="Inline math is").evaluate(
+            """node => {
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            }""")
+        page.locator('#context-menu .context-menu-item[data-action="copy"]').click()
+
+        copied = page.evaluate("() => window.__copied")
+        assert copied, "nothing reached the clipboard"
+        assert "$x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$" in copied[0], (
+            f"the formula's source did not reach the clipboard: {copied[0]!r}")
+        # And not the browser's own extraction of the MathML it was drawn into.
+        assert "\U0001d465" not in copied[0], "the drawn characters were copied"
+        assert page.locator("#toast").inner_text() == "已复制到剪贴板"
+        assert errors == [], f"the page raised: {errors}"
+    finally:
+        page.close()
+
+
+def test_a_chapter_that_loads_before_the_shell_is_still_wired(
+        browser, base_url, isolated):
+    """The frame sits above the shell's scripts, so a small chapter can finish
+    loading before `reader.js` attaches its `load` listener — and then that
+    listener never runs at all: no paper sheet, no saved highlights, no drawn
+    math. Delaying the shell's own script is how the race is forced rather than
+    waited for; without the check at init this page comes up unstyled and its
+    formulas stay as source.
+    """
+    slug = upload_book(base_url, write_latex_epub(isolated / "latex.epub"))
+    page = browser.new_page()
+
+    def slow_shell(route):
+        time.sleep(0.7)          # the chapter arrives first, deliberately
+        route.continue_()
+
+    try:
+        page.route("**/static/js/reader.js*", slow_shell)
+        page.goto(f"{base_url}/read/{quote(slug)}/0", wait_until="load")
+        page.wait_for_selector("#chapter-frame")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("[data-reader-math]").first.wait_for(timeout=30000)
+        state = page.evaluate("""() => {
+            const doc = document.querySelector('#chapter-frame').contentDocument;
+            return {
+                styled: Boolean(doc.getElementById('reader-style')),
+                spans: doc.querySelectorAll('[data-reader-math]').length,
+            };
+        }""")
+    finally:
+        page.close()
+
+    assert state == {"styled": True, "spans": 4}
+
+
+def test_a_chapter_without_formulas_fetches_no_renderer(browser, base_url, isolated):
+    """The converter is fetched for a chapter that has formulas, and not otherwise.
+
+    A hundred and seventy kilobytes is not a cost a library of prose should pay
+    on every page turn: the pass walks the chapter's text nodes first and only
+    reaches for the bundle — or its stylesheet — when a delimiter is there.
+    """
+    slug = upload_book(base_url, write_epub(isolated / "prose.epub"))
+    page = browser.new_page()
+    fetched = []
+    page.on("request", lambda request: fetched.append(request.url))
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0", wait_until="load")
+        page.wait_for_selector("#chapter-frame")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("h1").first.wait_for(timeout=20000)
+        page.wait_for_timeout(500)      # long enough for a fetch to have started
+        assert page.evaluate(
+            "document.querySelector('#chapter-frame').contentDocument"
+            ".querySelectorAll('[data-reader-math]').length") == 0
+    finally:
+        page.close()
+    assert [url for url in fetched if "temml" in url] == []
+
