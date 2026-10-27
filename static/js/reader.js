@@ -391,6 +391,12 @@ h1, h2, h3 { line-height: 1.4 !important; margin-top: 1.9em !important; margin-b
 img, svg, video, table { max-width: 100% !important; height: auto !important; }
 pre { white-space: pre-wrap !important; overflow-x: auto !important; }
 a { color: ${paper.link} !important; }
+/* A note's own label: the book's link back to the marker it was printed
+   against. 项狄传's stylesheet prints it at full size (its calibre12 class is
+   1em, nudged 4px up), so it runs straight into the note's first word — the
+   paper sheet gives it the space the book did not. Marked by wireMarkers; 书本
+   mode leaves the publisher's own spacing alone. */
+[data-note-label] { margin-right: 0.3em !important; }
 ::selection { background: ${paper.selection} !important; }
 `;
 }
@@ -861,6 +867,64 @@ function frameDocument() {
     }
 }
 
+// The note a marker opens, when that note is in the chapter on screen — the
+// only one the shell can look at. A note in another chapter is not here to
+// inspect, and nothing is guessed about it.
+function noteElement(edge) {
+    const chapter = BOOK.spine.indexOf(edge.target_href);
+    const doc = chapter === BOOK.index ? frameDocument() : null;
+    return doc && edge.target_anchor ? doc.getElementById(edge.target_anchor) : null;
+}
+
+// The label a note prints for itself, or null. Two shapes are *known*, and only
+// a known shape is ever acted on:
+//
+//   · the element the note resolves to *is* the label — 剑桥中华民国史's
+//     `<a id="filepos39577" href="#filepos23590">①</a> 关于汉学…`, the number
+//     linked back to the marker, with the note's text after it;
+//   · the note opens with that link — 项狄传's `<sup><a
+//     href="…/#fnref564">4</a></sup>斯特恩耍调皮的…`.
+//
+// Everything else is left alone; showPopup says why.
+function leadingLabel(target, marker, label) {
+    if (!target || !labelIsToken(label)) return null;
+    if (isBackLink(target, marker) && (target.textContent || "").trim() === label) {
+        return target;
+    }
+    for (const link of target.querySelectorAll("a[href]")) {
+        if (isBackLink(link, marker) && opensElement(target, link)) return link;
+    }
+    return null;
+}
+
+// Does `link` point back at the marker the reader clicked? The book prints that
+// pointer as a fragment naming the marker's own element.
+function isBackLink(link, marker) {
+    return Boolean(marker)
+        && (link.getAttribute("href") || "").split("#").pop() === marker;
+}
+
+// Does `node` print `stop` before anything else? Walks down through whatever
+// wrapper the book puts round its label (`<sup>`, `<span>`, `<i>`) and stops at
+// the first text it meets.
+function opensElement(node, stop) {
+    for (const child of node.childNodes) {
+        if (child === stop) return true;
+        if (child.contains && child.contains(stop)) return opensElement(child, stop);
+        if ((child.textContent || "").trim()) return false;
+    }
+    return false;
+}
+
+// A printed label is a token — "4", "①", "12" — never a phrase. Death of Caesar
+// anchors its markers on an empty element, and the back-link its producer built
+// out of the following words wraps real prose: the note prints "In 50 B.C.
+// Decimus was back in Rome…" and opens with a link reading "In 50". A text like
+// that must never be taken out of the note, so only tokens qualify.
+function labelIsToken(label) {
+    return Boolean(label) && label.length <= 4 && !/\s/.test(label);
+}
+
 function loadEdges() {
     const index = BOOK.index;
     fetch("/api/footnotes/" + encodeURIComponent(BOOK.slug) + "/" + index)
@@ -897,6 +961,17 @@ function wireMarkers() {
         const edge = byHref.get(anchor.getAttribute("href"));
         if (!edge) continue;
         anchor.dataset.edge = "1";
+        // The note this marker opens prints its own number as a label, and the
+        // book's own CSS prints it at full size (项狄传's class is 1em, nudged
+        // 4px up), so it can run straight into the note's first word — when it
+        // does. A book that spaced its own label (剑桥中华民国史 prints
+        // "① 关于…") needs nothing. Marked for the paper sheet, which owns the
+        // spacing; the note's own text is never rewritten.
+        const label = (edge.text || "").trim();
+        const printed = leadingLabel(noteElement(edge), anchor.id, label);
+        const rest = printed
+            ? (edge.target_text || "").slice((printed.textContent || "").length) : "";
+        if (printed && rest && !/^\s/.test(rest)) printed.dataset.noteLabel = "1";
         anchor.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -907,15 +982,35 @@ function wireMarkers() {
 
 function showPopup(anchor, edge) {
     footnotePopup.textContent = "";
-    const head = document.createElement("div");
-    head.className = "popup-head";
-    head.textContent = edge.text || "※";
-    footnotePopup.appendChild(head);
-    const note = document.createElement("div");
-    note.className = "popup-note" + (edge.resolved ? "" : " unresolved");
-    note.textContent = edge.resolved
+    const label = (edge.text || "").trim();
+    let body = edge.resolved
         ? (edge.target_text || "(this note block carries no text)")
         : "这个引用无法定位 — " + (edge.href || "no href");
+    // The note prints its own number as a label, and epubx folds it into the
+    // note's text — so the number would appear twice: as the head, and again at
+    // the head of the text. Where the note is on screen and that label is
+    // *known* (leadingLabel), it comes out of the text and the head prints it
+    // instead. Everywhere else nothing is taken out of the text: "the text opens
+    // with its own number" is not proof — 项狄传's note 2 opens "1742年在伦敦…"
+    // and Death of Caesar's markers are whole phrases — and a digit dropped from
+    // the book's text is unrecoverable. There the head yields, so the number is
+    // printed once either way.
+    const printed = leadingLabel(noteElement(edge), anchor.id, label);
+    const printedText = printed ? (printed.textContent || "").trim() : "";
+    const stripped = Boolean(printedText) && body.startsWith(printedText);
+    if (stripped) body = body.slice(printedText.length).replace(/^\s+/, "");
+    const repeated = !stripped && label && body.startsWith(label);
+    if (!repeated) {
+        // The head is the note's own label, printed once — a label, not a link:
+        // the popup is dismissed by clicking outside it, as it always was.
+        const head = document.createElement("div");
+        head.className = "popup-head";
+        head.textContent = edge.text || "※";
+        footnotePopup.appendChild(head);
+    }
+    const note = document.createElement("div");
+    note.className = "popup-note" + (edge.resolved ? "" : " unresolved");
+    note.textContent = body;
     footnotePopup.appendChild(note);
     if (edge.resolved && edge.target_href) {
         const open = document.createElement("a");
