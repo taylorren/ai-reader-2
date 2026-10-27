@@ -86,6 +86,30 @@ test("offsetToPoint finds the text node an offset lands in", () => {
     assert.equal(core.offsetToPoint([], 0), null);
 });
 
+test("offsetToPoint can resolve a boundary forward, for a range start", () => {
+    // A selection that begins right after an inline element starts, by default,
+    // at the *end* of that element's text node. A Range may hold that point —
+    // but `surroundContents` will not: the range then partially selects the
+    // element, and the wrap threw `InvalidStateError`, so the mark was stored
+    // and never painted (项狄传 vol 5 ch 34: "Ars longa，——和Vita brevis" sits
+    // right after `<small>希波克拉底</small>`). `preferNext` puts the start in
+    // the node the selection really begins in, which is what the wrap asks for.
+    const nodes = [{ nodeValue: "abc" }, { nodeValue: "def" }];
+    assert.equal(core.offsetToPoint(nodes, 3).node, nodes[0]);
+    assert.equal(core.offsetToPoint(nodes, 3).offset, 3);
+    assert.equal(core.offsetToPoint(nodes, 3, true).node, nodes[1]);
+    assert.equal(core.offsetToPoint(nodes, 3, true).offset, 0);
+    // At the run's end there is no next node to move to: the closing node is
+    // all there is, and the start stays there.
+    assert.equal(core.offsetToPoint(nodes, 6, true).node, nodes[1]);
+    assert.equal(core.offsetToPoint(nodes, 6, true).offset, 3);
+    // An offset inside a node is unaffected, with or without the bias.
+    assert.equal(core.offsetToPoint(nodes, 4, true).node, nodes[1]);
+    assert.equal(core.offsetToPoint(nodes, 4, true).offset, 1);
+    assert.equal(core.offsetToPoint(nodes, 0, true).node, nodes[0]);
+    assert.equal(core.offsetToPoint(nodes, 0, true).offset, 0);
+});
+
 test("textOffset measures a range point in the run's own coordinates", () => {
     const nodes = [{ nodeValue: "abc" }, { nodeValue: "def" }, { nodeValue: "gh" }];
     assert.equal(core.textOffset(nodes, nodes[0], 0), 0);

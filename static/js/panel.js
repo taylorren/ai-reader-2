@@ -847,7 +847,13 @@ window.ReaderPanel = (function () {
         const found = findTextRange(full, text,
                                     highlight.context_before, highlight.context_after);
         if (!found) return false;
-        const start = offsetToPoint(nodes, found.at);
+        // The start is biased forward when it lands on a node boundary: a
+        // selection that begins right after an inline element (项狄传's
+        // `<small>希波克拉底</small>Ars longa…`) would otherwise start inside
+        // that element and `surroundContents` would refuse the range — the mark
+        // was stored and never painted. The end keeps the boundary's default,
+        // which stays in the node it closes.
+        const start = offsetToPoint(nodes, found.at, true);
         const end = offsetToPoint(nodes, found.at + found.length);
         if (!start || !end) return false;
         const range = doc.createRange();

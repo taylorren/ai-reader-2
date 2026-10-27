@@ -1,15 +1,16 @@
 # ai-reader-2 — Pitfalls
 
 Every entry here is a bug that **actually shipped**, found by using the app the
-way it is deployed — in a container, over the LAN — and not the way the suite
-runs it. Each one produced plausible-looking behaviour: no exception, no console
-error, nothing in the log, and a feature that simply did not do its job. The
-suite was green for both of them.
+way it is deployed — in a container, over the LAN, with a real book — and not the
+way the suite runs it. Each one produced plausible-looking behaviour: no
+exception, no console error, and a feature that simply did not do its job — or,
+in entry 3's case, a message that named the symptom and not the cause. The suite
+was green for all of them.
 
-Read this before changing the front end or the packaging. What the two entries
-share is not a subsystem but a *gap*: the deployment is not the development
-machine, and every difference that mattered was one the test harness had smoothed
-away.
+Read this before changing the front end or the packaging. What the entries share
+is not a subsystem but a *gap*: what the app runs against — the machine, the
+book — is not what the tests run against, and every difference that mattered was
+one the test harness had smoothed away.
 
 **Evidence base:** the 2.0.0 image, built and smoke-tested in a NAS-shaped
 deployment (uid 1000, `./books` and `./data` bind mounts, port 8123); the app
@@ -24,7 +25,7 @@ Python tests, 47 Node tests and 8 browser tests were green through both.
 > **A test that ran on localhost, against the repo tree, has not run against the
 > deployment.**
 
-Four differences did all the damage, and every one of them was invisible in
+Five differences did all the damage, and every one of them was invisible in
 development:
 
 | Development | Deployment |
@@ -33,6 +34,7 @@ development:
 | one filesystem: `temp/` and `books/` inside the repo | two: `/app/temp` in the image layer, `/app/books` a bind mount |
 | a `.env` on disk | environment only |
 | a stub DOM that supplies whatever the code asks for | the browser that is actually there |
+| fixtures written for the shape in mind — a paragraph is prose in one text node | a real book's paragraph: prose interleaved with `<small>`, `<sup>`, `<a>` |
 
 ---
 
@@ -112,9 +114,53 @@ to a volume.
 
 ---
 
-## Why the suite was green for both
+## 3. A highlight saved, and never appeared — in one book
 
-Neither bug is a hole in coverage — both paths are tested. Both were tested under
+**Provenance: reported by the reader, on a real book.** 项狄传, volume 5 chapter
+34: select `Ars longa，——和Vita brevis`, 添加笔记, save — 「已保存到数据库」, the
+row is in the database, the API answered 200, and no mark is on the page. The
+shell did say so, in passing: 「本章有 1 条高亮未能定位」.
+
+The phrase sits where it does because of an inline element:
+
+```html
+<p class="indent">一开始，他便对医界泰斗<small class="calibre8">希波克拉底</small>Ars longa，——和Vita brevis<sup class="calibre9">…93</sup>的哀怨…</p>
+```
+
+Painting maps a stored mark back onto the served document: the block's text nodes
+are concatenated, the selection is found in that run, and the two offsets become
+a `Range`. `offsetToPoint` resolved a boundary to the node it *closes* — correct
+for a range's end, wrong for its start. The selection begins exactly where
+`</small>` ends, so the range began at the end of the text node *inside*
+`<small>`; a range that starts inside an element and ends outside it **partially
+selects** that element, and `Range.surroundContents` refuses it with
+`InvalidStateError`. The wrap caught that and returned false, so the mark was
+left unpainted — with the row stored and a `console.warn` that named the symptom
+(1 highlight not located) and not the cause.
+
+**Fix:** `offsetToPoint(nodes, offset, preferNext)` in `static/js/reader-core.js`
+resolves a boundary forward when the caller asks it to, and the wrap
+(`wrapText`, `static/js/panel.js`) asks for that on the range's *start* only. The
+end keeps the boundary's default — it belongs to the node it closes, which is
+where a range legitimately ends.
+
+**What pins it:** `tests/js/reader-core.test.js` ("offsetToPoint can resolve a
+boundary forward, for a range start") and
+`tests/test_browser.py::test_a_mark_that_begins_after_an_inline_element_is_painted`,
+which uploads `tests/fixtures.py`'s `write_inline_epub` — the same shape in
+English — and times out waiting for the mark when the bias is removed.
+
+**Lesson:** a synthetic paragraph is prose in one text node. A real book's is
+prose interleaved with `<small>`, `<sup>`, `<a>` — and a mark that begins right
+after one of them starts on a boundary no fixture here had. `surroundContents`
+is the part of the browser's range API that cares, and it fails by throwing, not
+by doing something visible.
+
+---
+
+## Why the suite was green for all of them
+
+None of these is a hole in coverage — every path is tested. Each was tested under
 an assumption that held only on the machine running the tests:
 
 - **The origin.** Every Python and browser test serves the app from `127.0.0.1`,
@@ -129,9 +175,14 @@ an assumption that held only on the machine running the tests:
   `/data`.
 - **The environment.** A container has no `.env` by design; testing the image is
   how the message in the next section was found.
+- **The book.** Every fixture paragraph here is prose in a single text node, so
+  every mark begins and ends inside one. Closed: `write_inline_epub` puts an
+  inline element where a mark can start against it, and a browser test seeds the
+  mark there — the shape a real book has and a fixture had not.
 
 When adding a feature, run it in the shape it ships in: the container, over the
-LAN address, with the volume mounts the README names.
+LAN address, with the volume mounts the README names — and against a real book,
+not only the fixtures.
 
 ## Near misses (caught before shipping, recorded for the same reason)
 
@@ -153,8 +204,9 @@ LAN address, with the volume mounts the README names.
 
 ## How to avoid adding to this list
 
-1. **Run it where it is deployed before believing it works.** Both bugs above
-   passed every test and failed in the container and on the LAN.
+1. **Run it where it is deployed before believing it works.** All three bugs
+   above passed every test and failed in the container, on the LAN, or on a real
+   book.
 2. **When a browser API is involved, ask what the API requires** — a secure
    context, a user gesture, a permission. `navigator.clipboard` needs the first,
    and an insecure origin does not warn you; it simply has no property.
@@ -163,6 +215,10 @@ LAN address, with the volume mounts the README names.
 4. **Say what happened, not what was attempted.** The toast claimed
    `已复制到剪贴板` for a copy that never occurred. A helper that returns whether
    it worked costs nothing and turns a silent lie into a message.
+5. **Ask what the DOM looks like in a real book, not in the fixture.** A
+   paragraph here is one text node; a paragraph there is prose between `<small>`
+   and `<sup>`. A range API — `surroundContents` — is where that difference
+   surfaces, and it throws rather than telling anyone.
 
 ---
 

@@ -41,6 +41,7 @@ import httpx  # noqa: E402
 
 from fixtures import (  # noqa: E402
     write_epub,
+    write_inline_epub,
     write_long_epub,
     write_repeated_epub,
     write_scripted_epub,
@@ -572,6 +573,41 @@ def test_a_repeated_sentence_marks_the_one_that_was_selected(browser, base_url, 
             "node => (node.previousSibling && node.previousSibling.nodeValue) || ''")
         assert before.strip().endswith("In between stands a marker."), (
             f"the mark landed on the wrong occurrence: {before!r}")
+    finally:
+        page.close()
+
+
+def test_a_mark_that_begins_after_an_inline_element_is_painted(
+        browser, base_url, isolated):
+    """The wrap's range start must not sit inside the inline element it follows.
+
+    `offsetToPoint` resolves a text-node boundary to the node it closes — right
+    for a range's *end*, wrong for its *start*: the range then partially selects
+    the inline element and `Range.surroundContents` throws `InvalidStateError`,
+    so the mark was stored and never painted. 项狄传 vol 5 ch 34 is the book that
+    showed it — "Ars longa，——和Vita brevis" begins right after
+    `<small>希波克拉底</small>`, and the reader was told 「本章有 1 条高亮未能
+    定位」 about a highlight that was in the database all along.
+
+    The fixture is that same shape in English, and the mark is *seeded* rather
+    than driven through the UI: the capture was never what broke, and seeding
+    keeps the test clear of the AI and the clipboard.
+    """
+    slug = upload_book(base_url, write_inline_epub(isolated / "inline.epub"))
+    payload = chapter_payload(base_url, slug)
+    block = next(item for item in payload["blocks"] if "Ars longa" in item["text"])
+    # The shape under test: the snippet begins exactly where the inline element
+    # ends, which is the boundary the range must not start inside.
+    assert "HippocratesArs longa" in block["text"]
+    snippet = "Ars longa and then carried on"
+    highlight_id = seed_highlight(base_url, slug, snippet, block["id"])
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        assert_mark(page, snippet, highlight_id)
+        # And the shell had nothing to report: the mark was located.
+        assert "未能定位" not in page.locator("#toast").inner_text()
     finally:
         page.close()
 

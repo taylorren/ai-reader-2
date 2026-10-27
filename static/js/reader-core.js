@@ -56,12 +56,28 @@ window.ReaderCore = (function () {
     }
 
     // The text node an offset into the concatenated run lands in.
-    function offsetToPoint(nodes, offset) {
+    //
+    // A boundary belongs to the node it closes — offset 3 of "abc"+"def" is the
+    // *end* of "abc", not the start of "def" — which is what a range's end
+    // wants. A range's *start* at that same offset must not sit inside the
+    // closing node: when an element splits the two, a range that begins at the
+    // end of the inline element's text *partially selects* that element, and
+    // `Range.surroundContents` refuses it — so the mark was stored and then
+    // never painted (项狄传: `<small>希波克拉底</small>Ars longa，——和Vita
+    // brevis`). `preferNext` resolves that boundary forward, into the node the
+    // selection really begins in, which is what the wrap asks for.
+    function offsetToPoint(nodes, offset, preferNext) {
         let position = 0;
-        for (const node of nodes) {
-            const length = node.nodeValue.length;
-            if (offset <= position + length) {
-                return { node, offset: offset - position };
+        for (let i = 0; i < nodes.length; i++) {
+            const length = nodes[i].nodeValue.length;
+            if (offset < position + length) {
+                return { node: nodes[i], offset: offset - position };
+            }
+            if (offset === position + length) {
+                if (preferNext && i + 1 < nodes.length) {
+                    return { node: nodes[i + 1], offset: 0 };
+                }
+                return { node: nodes[i], offset: length };
             }
             position += length;
         }

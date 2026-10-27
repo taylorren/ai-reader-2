@@ -554,6 +554,54 @@ def write_repeated_epub(path) -> Path:
     return Path(path)
 
 
+# A paragraph whose selection begins immediately after an inline element. The
+# wrap maps a stored mark back to a Range in the served document, and a range
+# that *starts* at the end of an inline element's text node partially selects
+# that element — which `Range.surroundContents` refuses, so the mark was stored
+# and then never painted (项狄传 vol 5 ch 34, where "Ars longa，——和Vita brevis"
+# follows `<small>希波克拉底</small>`).
+INLINE_CHAPTER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter One</title></head>
+<body>
+  <h1 id="top">Chapter One</h1>
+  <p>The physician said <small>Hippocrates</small>Ars longa and then carried on,
+     so this paragraph plainly carries real prose rather than a fragment, and the
+     sentence runs well past the phrase the reader marked.</p>
+  <p>A second paragraph follows, so the paragraph the reader marked is not the
+     only block in the chapter.</p>
+</body>
+</html>
+"""
+
+INLINE_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Inline Element</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:inline-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+  </spine>
+</package>
+"""
+
+
+def write_inline_epub(path) -> Path:
+    """A book whose paragraph splits its prose with an inline element."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", INLINE_OPF)
+        zf.writestr("OEBPS/ch1.xhtml", INLINE_CHAPTER)
+    return Path(path)
+
+
 # A chapter long enough to scroll, with paragraphs that name themselves. A
 # reading position is anchored to the block at the top of the viewport (REVIEW
 # P2-10), and proving that takes more than a screenful: the test scrolls to a
