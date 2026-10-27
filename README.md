@@ -53,8 +53,13 @@ Clipboard API. Which AI answers is a choice in the bar itself (本地 / 云端),
 not inside the panel: the panel is closed until a selection opens it, and that
 is a setting a reader wants to see first. `/highlights/{slug}`
 lists everything and exports it as Markdown; `/api/settings` switches between
-local and cloud Ollama (the bar's toggle is that setting). All of it survives a
-restart. **Docker packaging has
+local and cloud Ollama (the bar's toggle is that setting). **Formulas display,
+whatever the book ships**: its own MathML and its images render natively, and the
+shell converts a book's LaTeX to MathML itself with a vendored Temml (fetched
+only for a chapter that has formulas) — so a formula stays selectable text, and
+复制文本 copies the LaTeX the book wrote rather than the characters it drew. The
+sandbox stays shut, and the book's own scripts still never run. All of it
+survives a restart. **Docker packaging has
 landed** (P5, in part — see below, and the image it publishes); systemd
 packaging and the old world's removal come next.
 

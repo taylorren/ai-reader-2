@@ -146,8 +146,9 @@ Three models, to be decided before P2:
 
 - **A. iframe** — the book's document, its CSS, its fonts, sandboxed. Native
   in-book links and footnotes. Costs: highlights and AI selection move into
-  `iframe.contentDocument`; MathJax cannot run in a script-less frame; the
-  book's CSS owns dark mode.
+  `iframe.contentDocument`; MathJax cannot run in a script-less frame — the
+  shell draws math itself instead (see the coverage statement); the book's CSS
+  owns dark mode.
 - **B. `<base href>` graft** — fetch the book's XHTML into the reader's DOM with
   `<base href="/book/<slug>/<dir>/">`. Keeps every existing highlight and AI
   routine; costs the book's typography, since book CSS and scripts must be
@@ -190,7 +191,8 @@ markdown-it-py · bleach · python-multipart.
 
 **Dropped from ai-reader:** ebooklib, beautifulsoup4, and pickle.
 
-**Frontend unchanged in kind:** Jinja + Vue 3 + marked + DOMPurify — the
+**Frontend unchanged in kind:** Jinja + Vue 3 + marked + DOMPurify + **Temml
+0.14.0** (LaTeX → MathML, fetched only for a chapter that carries LaTeX) — the
 published bundles are vendored in `static/vendor/` (see its README), so there
 is no runtime CDN dependency, no build step and no `node_modules`.
 
@@ -306,14 +308,33 @@ Each phase is independently shippable and verifiable.
 **The rendering model is settled: A.** The shell serves the book's own document
 in a sandboxed iframe and rewrites nothing (P2) — that is what makes footnotes,
 images and typography work without a rewriting layer, and it is why every claim
-above is measured against real books rather than fixtures alone. Two
-consequences of that choice remain **open trade-offs**, named rather than
-solved:
+above is measured against real books rather than fixtures alone. One consequence
+of that choice was left open here; it is now closed, and one remains:
 
-* **MathJax** cannot run inside a script-less sandbox, so a book that ships it
-  renders its raw source. Reaching it means either executing scripts from the
-  book — which the sandbox exists to prevent — or rewriting the chapter, which
-  is the thing model A was chosen over.
+* **Math is converted by the shell, not by the book** (was: an open trade-off).
+  A book's formulas are usually LaTeX, and a script-less frame cannot run the
+  MathJax such a book ships. So the shell converts them itself —
+  `static/vendor/temml`, 0.14.0, LaTeX → **MathML** — and puts the result in the
+  frame's own document, on `$…$`, `$$…$$`, `\(…\)` and `\[…\]`, skipping
+  `pre`/`code`, leaving a price (`$5 and $10`) as prose, and leaving a macro the
+  converter cannot read exactly as the book wrote it, marked `data-math-error`.
+  MathML rather than a picture of the formula is deliberate: a formula stays
+  *text*, so it can be selected, found by find-in-page and read by assistive
+  technology, it follows the reader's font size, and it needs no font files of
+  its own — MathJax drawing SVG was what shipped first, and it is what this
+  replaced (2.1 MB against 168 KB, glyph outlines against text). The book's file
+  is still never written to and the book's own scripts still never run; the
+  bundle is fetched only for a chapter that carries LaTeX. Converting changes
+  what the document *says*, so each converted span keeps the source it was
+  written as (`data-source`): `ReaderCore.mathText` reads it back for every block
+  lookup — without it a paragraph holding a formula stops matching the text the
+  library extracted (measured: matched before the pass, null after it) — and
+  复制文本 projects the selection through it, so copying a formula hands the
+  reader `$x = \frac{…}$` rather than the characters the browser drew. Still
+  open: a highlight that *spans* a converted formula is not painted — the mark
+  would have to wrap text either side of an element, which
+  `Range.surroundContents` refuses — and the reader says so
+  (本章有 N 条高亮未能定位) rather than losing it.
 * **Dark mode is the shell's, not the book's.** A book whose own CSS sets
   colours keeps them, so the two can disagree on a dark background. Paper mode
   exists for that reason; 书本 mode is the publisher's design, untouched.

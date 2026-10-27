@@ -201,6 +201,34 @@ not only the fixtures.
   `urllib.request.urlopen` honours it, so the check asked a proxy that does not
   exist inside the container. Read the artifact that produced a failure before
   believing it.
+- **Drawing a book's LaTeX changes what the document says.** The shell converts a
+  book's formulas into the frame's own document, so `$x = \frac{a}{b}$` becomes
+  the MathML the browser draws. Every block lookup in `reader-core.js` compares
+  text against what the library extracted — and that comparison is what anchors a
+  highlight and the reading position — so a paragraph holding a formula stopped
+  matching the moment it was converted: measured `matched` before the pass,
+  `null` after it. The fix is to keep the source beside the formula (`data-source`
+  on each converted span) and read it back (`ReaderCore.mathText`), which restores
+  the match exactly — and which 复制文本 uses too, so a reader who copies a formula
+  gets the LaTeX the book wrote instead of the characters the browser drew from
+  it. Pinned by
+  `tests/test_browser.py::test_the_shell_draws_a_books_latex` (the source is gone
+  from the document's text and the block lookup matches anyway),
+  `::test_copying_a_selection_carries_the_formula_source`, and the `mathText` unit
+  tests.
+- **A chapter that loads before the shell's own scripts is never wired.** The
+  frame sits *above* the shell's scripts in `templates/reader.html`, so a chapter
+  small enough to arrive first fires its `load` event before `reader.js` has
+  attached the listener — and then the listener never runs for that chapter at
+  all: no paper sheet, no saved highlights, no reading position, and (once math
+  was added) formulas still as source. Found while testing math rendering, where
+  it reproduced on the first page load roughly one time in eight and looked
+  exactly like a renderer bug; the diagnostic that settled it was a `load`-handler
+  log that never appeared. The footnote/image wiring already worked around this
+  race at init; `onFrameLoad` is now guarded per document and asked for at init
+  too, so the rest of the wiring cannot be missed. Pinned by
+  `tests/test_browser.py::test_a_chapter_that_loads_before_the_shell_is_still_wired`,
+  which *forces* the race by delaying `reader.js` instead of waiting for it.
 
 ## How to avoid adding to this list
 
