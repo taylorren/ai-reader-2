@@ -669,8 +669,6 @@ def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
         assert cloud.get_attribute("aria-checked") == "false"
         assert stored_settings(base_url)["provider_override"] == "ollama"
         assert page.locator("#ai-panel").is_hidden(), "no panel was needed"
-        # The panel's own select is the same setting, not a second one.
-        assert page.locator("#provider-select").input_value() == "ollama"
 
         # It is the server's choice now: a reload renders it checked, from the
         # markup (routers/reader.py), before any script runs.

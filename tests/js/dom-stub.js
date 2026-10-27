@@ -127,10 +127,10 @@ function createPage(options = {}) {
     });
 
     // The bar's provider toggle (templates/reader.html): a radiogroup of two
-    // options, so a test can click one and see what the page sends — and see
-    // both controls painted from the same value. `createPage({provider})` is the
-    // *server-rendered* choice: which option arrives checked, before any script
-    // has run.
+    // options, so a test can click one and see what the page sends. It is the
+    // only provider control — the panel's select was removed.
+    // `createPage({provider})` is the *server-rendered* choice: which option
+    // arrives checked, before any script has run.
     const providerOptions = ["ollama", "ollama_cloud"].map((provider) => {
         const option = makeElement("button", registry);
         option.dataset.provider = provider;

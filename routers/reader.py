@@ -195,9 +195,9 @@ def shell_context(request: Request, slug: str, row: dict, book, chapter_index: i
             "static/js/reader.js", "static/js/panel.js",
             "static/js/reader-core.js", "static/css/reader.css"),
         "initial_src": initial_src,
-        # Which AI answers, for the two controls that show it (the bar's toggle
-        # and the panel's select). Server-rendered so the choice is right on the
-        # first paint and stays right with no JavaScript — the same value
+        # Which AI answers, for the bar's toggle — the only control that shows
+        # it (the panel's select is gone). Server-rendered so the choice is right
+        # on the first paint and stays right with no JavaScript — the same value
         # /api/settings serves, from the same definition (app_state.effective_provider).
         "provider": effective_provider(),
         "book_data": {

@@ -112,10 +112,12 @@ window.ReaderPanel = (function () {
 
     // -- provider ------------------------------------------------------------
 
-    // The provider has two controls and one value: the bar's toggle, which is
-    // always in sight, and the panel's select, which is in sight only while the
-    // panel is open. `renderProvider` paints both from `state.provider`, so
-    // neither can drift from the other — nor from what the server is set to.
+    // The provider has one control and one value: the bar's toggle, which is
+    // always in sight. It used to be in two places — the toggle and a select
+    // inside the panel — and the panel's copy is gone: the panel is closed until
+    // a selection opens it, so it could not show the choice at the moment a
+    // reader wants to make it. `renderProvider` paints the one control from
+    // `state.provider`, which the server rendered it with.
     function renderProvider() {
         for (const option of document.querySelectorAll("#provider-toggle .provider-option")) {
             const chosen = option.dataset.provider === state.provider;
@@ -124,7 +126,6 @@ window.ReaderPanel = (function () {
             // the arrows move within the group (see init's keydown).
             option.tabIndex = chosen ? 0 : -1;
         }
-        el("provider-select").value = state.provider;
     }
 
     // The choice the shell was rendered with — the server's own answer
@@ -134,8 +135,7 @@ window.ReaderPanel = (function () {
     function renderedProvider() {
         const checked = document.querySelector(
             "#provider-toggle .provider-option[aria-checked='true']");
-        return (checked && checked.dataset.provider)
-            || el("provider-select").value || "ollama_cloud";
+        return (checked && checked.dataset.provider) || "ollama_cloud";
     }
 
     async function loadSettings() {
@@ -262,8 +262,6 @@ window.ReaderPanel = (function () {
         // — and /api/settings only confirms it.
         state.provider = renderedProvider();
         renderProvider();
-        el("provider-select").addEventListener("change",
-            (event) => setProvider(event.currentTarget.value));
         // The bar's toggle. A radiogroup is one tab stop, so the arrows move
         // between the two options; a click, or Space/Enter on an option, is
         // native button behaviour and arrives as a click.

@@ -225,10 +225,10 @@ test("a copy that did not happen says so, instead of claiming success", async ()
 // The provider was changeable only inside the AI panel, which is not on screen
 // until a selection opens it — so "which model answers" was a setting the
 // reader could not see, let alone set, until they had already asked something.
-// The bar's toggle is the same setting in the open: two named options, and one
-// value shared with the panel's select, so the two cannot disagree.
+// The bar's toggle is the setting now, in the open: two named options, and the
+// only control — the panel's select was removed once the toggle existed.
 
-test("the bar's toggle and the panel's select are one setting", async () => {
+test("the bar's toggle is the setting", async () => {
     const page = scriptedPage();
     page.route(/\/api\/settings$/, { provider_override: "ollama", status: "success" });
 
@@ -238,11 +238,9 @@ test("the bar's toggle and the panel's select are one setting", async () => {
 
     assert.equal(page.P.state.provider, "ollama");
     assert.equal(page.body(page.lastRequest(/\/api\/settings$/)).provider_override,
-                 "ollama", "the choice is stored, as the panel's select did");
+                 "ollama", "the choice is stored");
     assert.equal(local.getAttribute("aria-checked"), "true");
     assert.equal(page.providerOptions[1].getAttribute("aria-checked"), "false");
-    assert.equal(page.el("provider-select").value, "ollama",
-                 "the panel's select shows the same value");
 
     // …and it is what the next request carries, without opening the panel.
     page.menuItems.find((i) => i.dataset.action === "fact_check").click();
@@ -272,7 +270,6 @@ test("the provider the shell was rendered with is the one in force", async () =>
     const page = scriptedPage({ provider: "ollama" });
 
     assert.equal(page.P.state.provider, "ollama");
-    assert.equal(page.el("provider-select").value, "ollama");
     assert.equal(page.providerOptions[0].getAttribute("aria-checked"), "true");
 });
 

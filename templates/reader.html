@@ -48,11 +48,11 @@
                         <span class="toggle-track"><span class="toggle-knob"></span></span>
                     </button>
                     <button id="theme-toggle" class="bar-btn" title="夜间模式">🌙</button>
-                    <!-- Which AI answers, in the open. The panel's own select is
-                         out of sight until a selection opens the panel, and this
-                         is a choice a reader wants to make — and see — before
-                         they select anything. Both controls are one setting;
-                         panel.js paints them from the same state. -->
+                    <!-- Which AI answers, in the open — the only control for it.
+                         It used to sit in the panel's tools as well, out of
+                         sight until a selection opened the panel, and this is a
+                         choice a reader wants to make — and see — before they
+                         select anything. panel.js paints it from state.provider. -->
                     <div id="provider-toggle" class="provider-toggle" role="radiogroup"
                          aria-label="AI 提供方">
                         <span class="provider-label" aria-hidden="true">AI</span>
@@ -114,10 +114,6 @@
                 <div class="panel-tools">
                     <a id="panel-highlights-link" class="panel-link"
                        href="/highlights/{{ slug | urlencode }}">全部高亮 ↗</a>
-                    <select id="provider-select" class="font-select" title="AI 提供方">
-                        <option value="ollama" {% if provider == 'ollama' %}selected{% endif %}>本地 Ollama</option>
-                        <option value="ollama_cloud" {% if provider != 'ollama' %}selected{% endif %}>云端 Ollama</option>
-                    </select>
                 </div>
                 <blockquote id="panel-selected" class="panel-selected"></blockquote>
                 <div id="panel-body" class="panel-body"></div>

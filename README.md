@@ -50,11 +50,11 @@ now live on that DOM: select text to explain it (解释说明), discuss it
 library's block id, and its AI response is stored as Markdown. The same menu
 copies the selection (复制文本) — on plain http too, where a browser has no
 Clipboard API. Which AI answers is a choice in the bar itself (本地 / 云端),
-not only inside the panel: the panel is closed until a selection opens it, and
-that is a setting a reader wants to see first. `/highlights/{slug}`
+not inside the panel: the panel is closed until a selection opens it, and that
+is a setting a reader wants to see first. `/highlights/{slug}`
 lists everything and exports it as Markdown; `/api/settings` switches between
-local and cloud Ollama (the bar's toggle and the panel's select are that one
-setting). All of it survives a restart. **Docker packaging has
+local and cloud Ollama (the bar's toggle is that setting). All of it survives a
+restart. **Docker packaging has
 landed** (P5, in part — see below, and the image it publishes); systemd
 packaging and the old world's removal come next.
 
