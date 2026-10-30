@@ -495,6 +495,25 @@ def test_progress_is_saved_and_restored(isolated_client, isolated, db):
             or '"saved_block_id":"c0001/b0003"' in body)
 
 
+def test_the_shell_hands_the_client_the_sequence_it_must_outrank(
+        isolated_client, isolated, db):
+    """The guard drops a write whose `seq` is older than the stored one, and the
+    client has no other way to learn that value — so a stored sequence ahead of
+    the client's clock refused every write for that book, silently and for good
+    (PITFALLS: a sequence the client cannot outrank). The shell passes the
+    sequence in with the position, and on whichever chapter is on screen: it
+    orders the book's writes, not the chapter's."""
+    slug = upload(isolated_client, isolated)
+    db.save_progress(slug, 1, scroll_percent=90.0, block_id="c0001/b0009",
+                     seq=10 ** 15)
+
+    assert re.search(r'"saved_seq":\s*1000000000000000',
+                     isolated_client.get(f"/read/{slug}/1").text)
+    # The chapter the stored position is *not* in still carries it.
+    assert re.search(r'"saved_seq":\s*1000000000000000',
+                     isolated_client.get(f"/read/{slug}/0").text)
+
+
 def test_an_old_database_drops_the_anchor_column_and_keeps_its_rows(tmp_path):
     """P2-10: `anchor` was a second anchor scheme — accepted by the API, written
     to the database, read by nothing. The column goes; the row stays, and so

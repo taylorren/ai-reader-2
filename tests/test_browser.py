@@ -398,9 +398,13 @@ def test_a_stored_block_anchor_is_where_the_reader_returns(browser, base_url, is
         # reading the other page's save (which is exactly what it did, until the
         # probe showed the percent landing perfectly on its own).
         page.close()
-        # `seq` above any the client can send: its writes carry
-        # `Math.max(counter + 1, Date.now())`, and a smaller `seq` is refused as
-        # stale — which is what the guard is for (REVIEW P2-8).
+        # `seq` above any the client can send *without having read the stored
+        # one*: a page that loaded before this seed carries a timestamp, and a
+        # smaller `seq` is refused as stale — which is what the guard is for
+        # (REVIEW P2-8). A page that loads *after* it reads this sequence and
+        # outranks it (PITFALLS 6), which is harmless here: what the check below
+        # needs is where the fresh page lands, not what the row holds after it
+        # has saved.
         save_progress(base_url, slug, scroll_percent=50, block_id="c9999/b9999",
                       seq=10 ** 15)
         context = browser.new_context()

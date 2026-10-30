@@ -173,7 +173,8 @@ def read_redirect(slug: str):
 
 def shell_context(request: Request, slug: str, row: dict, book, chapter_index: int,
                   unsupported: str | None, saved_percent: float = 0.0,
-                  saved_block_id: str | None = None) -> dict:
+                  saved_block_id: str | None = None,
+                  saved_seq: int = 0) -> dict:
     """The reader shell's context — for a chapter, or for a reason page.
 
     A book with no readable chapter renders the same template with
@@ -209,6 +210,13 @@ def shell_context(request: Request, slug: str, row: dict, book, chapter_index: i
             # The block the reader stopped in: the resume's identity, with the
             # percent as the fallback for a row that predates it (REVIEW P2-10).
             "saved_block_id": saved_block_id or "",
+            # The sequence the server last stored for this book. The client's
+            # own writes carry a sequence and must outrank it or they are
+            # refused as stale — so the client is told what it has to beat.
+            # Without this it could not know, and a stored sequence ahead of
+            # `Date.now()` refused every write for the book, silently and for
+            # good (PITFALLS: a sequence the client cannot outrank).
+            "saved_seq": int(saved_seq or 0),
             # ?highlight=<id> — a "在书中定位" link; the shell scrolls to it.
             "target_highlight": request.query_params.get("highlight", ""),
         },
@@ -255,6 +263,10 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
         progress = get_db().get_progress(slug)
         saved_percent = 0.0
         saved_block_id = None
+        # The ordering token is per book, not per chapter, so it travels with
+        # the shell whichever chapter is on screen: the client has to outrank
+        # whatever the row holds (see `progressSeq` in reader.js).
+        saved_seq = progress["seq"] if progress else 0
         if progress and progress["chapter_index"] == chapter_index:
             saved_percent = progress["scroll_percent"] or 0.0
             saved_block_id = progress["block_id"]
@@ -263,7 +275,8 @@ def reader_shell(request: Request, slug: str, chapter_index: int):
             request=request,
             name="reader.html",
             context=shell_context(request, slug, row, book, chapter_index,
-                                  unsupported, saved_percent, saved_block_id),
+                                  unsupported, saved_percent, saved_block_id,
+                                  saved_seq),
         )
 
 

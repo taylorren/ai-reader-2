@@ -19,11 +19,12 @@ const book = () => ({
     toc: [{ label: "Chapter One", href: "OEBPS/ch1.xhtml", anchor: "", children: [] },
           { label: "Chapter Two", href: "OEBPS/ch2.xhtml", anchor: "", children: [] }],
     saved_percent: 0,
+    saved_seq: 0,
     target_highlight: "",
 });
 
 function shellPage(options = {}) {
-    const page = createPage({ book: book(), files: options.files });
+    const page = createPage({ book: options.book || book(), files: options.files });
     page.route(/\/api\/progress$/, { status: "success" });
     page.route(/\/api\/footnotes\//, { edges: [] });
     page.route(/\/api\/text\//, { blocks: [] });
@@ -145,6 +146,26 @@ test("a chapter turn records the chapter being left before the one entered", () 
     assert.equal(entered.scroll_percent, 0);
     assert.ok(entered.seq > left.seq,
               `the later write must outrank the earlier: ${entered.seq} vs ${left.seq}`);
+});
+
+test("the first write outranks the sequence the server already holds", () => {
+    // The guard refuses a write whose `seq` is older than the stored one, and
+    // the client cannot otherwise learn that value — so a stored sequence far
+    // ahead of the client's clock refused every write for that book, silently
+    // and for good (PITFALLS). The shell passes the stored sequence in, so the
+    // counter starts above it and the book records progress again.
+    const stored = 10 ** 15;
+    const page = shellPage({ book: { ...book(), saved_seq: stored } });
+    page.frame().contentWindow.scrollY = 1600;
+    page.fire("load", page.frame());
+
+    page.fire("keydown", page.frame().contentWindow, { key: "ArrowRight" });
+
+    const saved = progressSaves(page).pop();
+    assert.ok(saved, "the position was written");
+    const seq = JSON.parse(saved.body).seq;
+    assert.ok(seq > stored,
+              `the write must outrank the stored sequence: ${seq} vs ${stored}`);
 });
 
 test("coming back to a chapter restores where the reader was in it", () => {

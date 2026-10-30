@@ -553,8 +553,15 @@ const lastPercentByChapter = new Map();
    chapter they are in, and the stored position then moved *backwards* a chapter
    (REVIEW P2-8). Strictly increasing, and comparable across sessions: a counter
    alone would restart at 1 after a reload — *below* whatever the server has
-   stored — and every write after a refresh would be dropped as stale. */
-let progressSeq = 0;
+   stored — and every write after a refresh would be dropped as stale.
+
+   It therefore starts *above* the sequence the server holds, which the shell
+   passes in with the position. A stored sequence the client cannot outrank
+   refuses every write for that book, silently and for good — a row written
+   with a sequence far ahead of `Date.now()` stopped recording progress
+   entirely — and the client has no other way to learn that value. Starting
+   above it also survives a client clock that runs behind the server's. */
+let progressSeq = Number(BOOK.saved_seq) || 0;
 
 function nextProgressSeq() {
     progressSeq = Math.max(progressSeq + 1, Date.now());
