@@ -305,6 +305,68 @@ book's entries were therefore unreachable in a way no test could see.
 
 ---
 
+## 6. A book stopped recording where the reader was — silently, and for good
+
+**Provenance: reported by the reader, on a real book.** 自由的窄廊: after a
+session in chapter one, every return landed on the same 88%. Read on, close,
+reopen — 88% again. The row was in the database, `/api/progress` answered 200,
+the client logged nothing. The position was simply never written again.
+
+Progress writes carry a sequence so that the save for the chapter a reader just
+left cannot land after the one for the chapter they are in and move the stored
+position *backwards* (REVIEW P2-8). The guard is
+`WHERE excluded.seq = 0 OR excluded.seq >= reading_progress.seq`, and the client's
+sequence is `Math.max(counter + 1, Date.now())` — a timestamp, near 1.79e12. This
+book's row held **1e15**, written by a manual probe against the live app: an
+`httpx.post` to `/api/progress` seeding the position (`chapter_index 8,
+scroll_percent 88.0, block_id c0008/b0238`) with a sequence no client could beat,
+so that the running reader could not overwrite it while the resume was checked.
+It is the same trick `tests/test_browser.py` uses (`seq=10 ** 15`) — but that
+test writes to an *isolated* database, and the probe wrote to the library. Every
+write the reader made was therefore older than the stored one, and refused, for
+ever:
+
+```
+stored now                    : scroll 88.0  block c0008/b0238  seq 1000000000000000
+after client seq=1793351087248: scroll 88.0  block c0008/b0238  seq 1000000000000000   # unchanged
+after seq=1e15+1              : scroll 12.0  block c0008/b0012  seq 1000000000000001   # accepted
+```
+
+The client could not recover on its own, because it had no way to *learn* that
+value: the shell handed it the position's percent and block, never the sequence
+the position was ordered by. The failure was total and invisible — the stored
+position stayed at whatever the last accepted write had said, and no amount of
+reading moved it.
+
+**Fix:** the shell hands the client the sequence it has to outrank. `saved_seq`
+joins `saved_percent`/`saved_block_id` in `window.BOOK` (`shell_context`,
+`routers/reader.py`), and `progressSeq` in `static/js/reader.js` starts at
+`Number(BOOK.saved_seq) || 0` rather than 0 — so a session's first write is above
+whatever the row holds, whatever that is. The guard keeps its meaning (a
+genuinely older write is still refused) and becomes self-healing: the row above
+was repaired by the next scroll, with no data surgery. It also covers a client
+whose clock runs behind the server's, which the old code would have refused for
+as long as the skew lasted.
+
+**What pins it:**
+`tests/test_reader.py::test_the_shell_hands_the_client_the_sequence_it_must_outrank`
+(the sequence reaches `window.BOOK` on the position's chapter *and* on another —
+it orders the book's writes, not the chapter's), `tests/js/reader-shell.test.js`
+("the first write outranks the sequence the server already holds": a stored 1e15
+and a write above it), and
+`tests/test_settings.py::test_an_older_progress_write_cannot_move_the_reader_backwards`
+(the guard still refuses a straggler).
+
+**Lesson:** an ordering token the *client* generates, used as a guard on the
+*server*, must be one the client can always beat. A stored value out of the
+client's reach does not fail loudly — it turns every later write into a silent
+no-op, which is the worst shape a save can take. And a probe that *pins* state to
+observe behaviour has to run against the isolated library: run by hand against the
+real one, its "pass" (the reader really could not move the position) is
+indistinguishable from the book never saving again.
+
+---
+
 ## Why the suite was green for all of them
 
 None of these is a hole in coverage — every path is tested. Each was tested under
