@@ -10,6 +10,10 @@
     --accent-soft: #eaf1fa;
     --danger: #b04a4a;
     --ok: #4a8f5d;
+    /* The "done" tint: a finished book's card, and the success toast. One pair
+       of values, so the two cannot drift apart. */
+    --ok-soft: #eef7ee;
+    --ok-line: #bfe0c5;
 }
 
 body.dark-mode {
@@ -22,6 +26,8 @@ body.dark-mode {
     --accent-soft: #2c3644;
     --danger: #d98080;
     --ok: #85c79a;
+    --ok-soft: #203226;
+    --ok-line: #3a5c42;
 }
 
 body {
@@ -86,9 +92,9 @@ body {
     display: none;
 }
 .upload-status.show { display: block; }
-.upload-status.success { background: #eef7ee; border-color: #bfe0c5; color: #2e6b3e; }
+.upload-status.success { background: var(--ok-soft); border-color: var(--ok-line); color: #2e6b3e; }
 .upload-status.error { background: #f9eeee; border-color: #e5bcbc; color: #8a3030; }
-body.dark-mode .upload-status.success { background: #203226; border-color: #3a5c42; color: #9fd8ab; }
+body.dark-mode .upload-status.success { color: #9fd8ab; }
 body.dark-mode .upload-status.error { background: #3a2424; border-color: #6b3a3a; color: #e5a1a1; }
 
 /* Groups and cards */
@@ -137,6 +143,7 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
 .book-card.hidden { display: none; }
 
 .book-card {
+    position: relative;         /* the completion badge is placed against the cover */
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -147,7 +154,22 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
     transition: transform 0.15s, box-shadow 0.15s, opacity 0.25s;
 }
 .book-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1); }
-.book-card.completed { box-shadow: 0 0 0 2px var(--ok) inset; }
+
+/* A finished book has to read as finished from across the shelf, so the whole
+   card changes — not just the progress line: the "done" tint, a green edge,
+   and a check on the cover. An open book, and one never opened, keep the plain
+   card, which is what makes the difference legible. */
+.book-card.completed {
+    background: var(--ok-soft);
+    border-color: var(--ok-line);
+    box-shadow: 0 0 0 2px var(--ok) inset;
+}
+/* The hover shadow is spelled out rather than inherited: at equal specificity
+   the rule above would win and a completed card would be the one card that
+   does not lift under the pointer. */
+.book-card.completed:hover {
+    box-shadow: 0 0 0 2px var(--ok) inset, 0 4px 14px rgba(0, 0, 0, 0.1);
+}
 
 .book-cover-link { text-decoration: none; color: inherit; }
 
@@ -161,6 +183,38 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
     justify-content: center;
 }
 .book-cover img { width: 100%; height: 100%; object-fit: contain; }
+
+/* A completed book's cover is dimmed and desaturated — still recognisable, but
+   visibly spent — inside a green edge. The badge is a sibling of the cover, not
+   a child, so this opacity and filter cannot fade the check with it. */
+.book-card.completed .book-cover {
+    opacity: 0.7;
+    filter: grayscale(0.5);
+    box-shadow: 0 0 0 2px var(--ok-line);
+}
+
+.completion-badge {
+    position: absolute;
+    top: 20px;                  /* the card's 14px padding, then 6px onto the cover */
+    right: 20px;
+    z-index: 1;
+    box-sizing: border-box;
+    width: 30px;
+    height: 30px;
+    border: 2px solid var(--ok);
+    border-radius: 50%;
+    background: var(--card);
+    color: var(--ok);
+    font-size: 0.9em;
+    font-weight: 700;
+    line-height: 26px;          /* 30px less the 2px borders */
+    text-align: center;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.22);
+    /* The cover underneath stays the book's link: the badge is a mark, not a
+       control, and a dead corner on the cover would be a trap. */
+    pointer-events: none;
+}
+
 .cover-placeholder {
     font-size: 2.4em;
     color: var(--accent);

@@ -222,6 +222,48 @@ def test_completion_of_an_unknown_book_is_a_404(isolated_client):
     assert response.status_code == 404
 
 
+def card_markup(page: str, slug: str) -> str:
+    """The `<article>` the library rendered for one book, whole.
+
+    The card's classes and the badge it may carry live inside this element, so
+    asking the page as a whole would answer about some other book's card.
+    """
+    match = re.search(
+        rf'<article class="book-card[^"]*"[^>]*'
+        rf'data-slug="{re.escape(slug)}".*?</article>',
+        page, re.S)
+    assert match, f"the library rendered no card for {slug}"
+    return match.group(0)
+
+
+def test_a_completed_card_and_its_cover_differ_from_an_open_book(
+        isolated_client, isolated):
+    """Marking a book complete is a state a reader has to *see* on the shelf.
+
+    The green progress line alone is not it: the card takes the "done" tint and
+    edge, and the cover carries a check, while a book that is open or never
+    opened keeps the plain card. Both halves are server-rendered, so both are
+    asserted here — the painted half is tests/test_browser.py's job.
+    """
+    slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
+
+    open_card = card_markup(isolated_client.get("/").text, slug)
+    assert 'class="book-card"' in open_card
+    assert "completion-badge" not in open_card
+
+    isolated_client.post(f"/api/books/{slug}/completion?completed=true")
+    done_card = card_markup(isolated_client.get("/").text, slug)
+    assert 'class="book-card completed"' in done_card
+    assert '<div class="completion-badge"' in done_card
+    assert "✓" in done_card
+
+    # Marking it incomplete again takes the mark off the shelf with it.
+    isolated_client.post(f"/api/books/{slug}/completion?completed=false")
+    back = card_markup(isolated_client.get("/").text, slug)
+    assert 'class="book-card"' in back
+    assert "completion-badge" not in back
+
+
 def test_library_progress_spans_the_book_not_the_current_chapter(
         isolated_client, isolated):
     """`scroll_percent` is within-chapter; the card must show book progress."""

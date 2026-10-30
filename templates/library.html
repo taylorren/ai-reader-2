@@ -40,6 +40,14 @@
                              data-group="{{ book.title_group }}"
                              data-progress="{{ book.progress_percent }}"
                              data-search="{{ (book.title ~ ' ' ~ book.author) | lower }}">
+                        {% if book.is_completed %}
+                        <!-- The mark a reader reads off the shelf: a check on the
+                             cover, with the card itself tinted green below. It is
+                             decoration — the progress line already says
+                             "Completed" in words — and it sits above the cover
+                             without swallowing the cover's own link. -->
+                        <div class="completion-badge" aria-hidden="true">✓</div>
+                        {% endif %}
                         {% if book.unsupported %}
                         <div class="book-cover">
                             {% if book.cover_url %}

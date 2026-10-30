@@ -463,6 +463,71 @@ def test_deleting_the_last_book_of_a_letter_takes_its_pill(browser, base_url, is
         page.close()
 
 
+def test_a_completed_book_is_marked_on_the_shelf(browser, base_url, isolated):
+    """A completed book has to *look* completed — the card and the cover both.
+
+    The server renders the class and the badge, which tests/test_library.py
+    asserts; what that cannot assert is that a stylesheet rule stands behind
+    either of them, which is the failure P3-3 was: a class that landed with
+    nothing to paint it. So the two cards are compared side by side, in the
+    computed styles a reader's eye actually gets — a tinted card, a dimmed
+    cover, a check drawn *on* the cover rather than beside it.
+    """
+    open_slug = upload_book(base_url,
+                            write_epub(isolated / "open.epub", title="Open Book"))
+    done_slug = upload_book(base_url,
+                            write_epub(isolated / "done.epub", title="Done Book"))
+    with httpx.Client(base_url=base_url, timeout=30) as client:
+        response = client.post(f"/api/books/{done_slug}/completion?completed=true")
+    assert response.status_code == 200, response.text
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/")
+        done = page.locator(f'.book-card[data-slug="{done_slug}"]')
+        plain = page.locator(f'.book-card[data-slug="{open_slug}"]')
+
+        def painted(locator, prop):
+            """A computed style — what the browser paints with, not what we set."""
+            return locator.evaluate(f"node => getComputedStyle(node).{prop}")
+
+        assert "completed" in (done.get_attribute("class") or "")
+        assert "completed" not in (plain.get_attribute("class") or "")
+
+        # The card: the "done" tint rather than the plain card colour.
+        assert painted(done, "backgroundColor") != painted(plain, "backgroundColor"), (
+            "a completed card is painted exactly like an open one")
+
+        # The cover: dimmed and desaturated against the open book's.
+        dimmed = done.locator(".book-cover")
+        opened = plain.locator(".book-cover")
+        assert float(painted(dimmed, "opacity")) < float(painted(opened, "opacity")), (
+            "a completed cover is not dimmed")
+        assert painted(dimmed, "filter") != painted(opened, "filter"), (
+            "a completed cover is not desaturated")
+
+        # The check, drawn over the cover's own corner rather than beside it.
+        badge = done.locator(".completion-badge")
+        assert badge.is_visible(), "the completed card carries no visible check"
+        assert badge.inner_text() == "✓"
+        assert plain.locator(".completion-badge").count() == 0
+
+        badge_box, cover_box = badge.bounding_box(), dimmed.bounding_box()
+        assert cover_box["x"] <= badge_box["x"] and (
+            badge_box["x"] + badge_box["width"]
+            <= cover_box["x"] + cover_box["width"])
+        assert cover_box["y"] <= badge_box["y"], "the check is not on the cover"
+
+        # The mark must not swallow the cover: a click on the check itself is a
+        # click on the book, which is the only thing that corner can be for.
+        page.mouse.click(badge_box["x"] + badge_box["width"] / 2,
+                         badge_box["y"] + badge_box["height"] / 2)
+        page.wait_for_url(lambda url: "/read/" in url)
+        assert "/read/" in page.url
+    finally:
+        page.close()
+
+
 def test_deleting_an_item_recounts_the_stats_bar(browser, base_url, isolated):
     """P3-12: the counts are rendered once by the server, so a deletion used to
     leave them claiming items that were gone — and an empty page still showing
