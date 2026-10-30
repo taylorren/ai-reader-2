@@ -123,14 +123,14 @@ wheels = [
 
 [[package]]
 name = "epub-extended"
-version = "0.2.2"
+version = "0.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lxml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/ba/b10daac0e2ad9e91d83022758cf080e920c4f9b441ffaa22492c168ad859/epub_extended-0.2.2.tar.gz", hash = "sha256:edd39abce5b163b9a14bb26b7be920bedd9a362608ca42e9b59c5cc7b0aa82ac", size = 83594, upload-time = "2026-10-10T02:18:29.656Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/22/ebc43e52c2d3f7702a014ab200c087517377094d7782b84722a2a187cc1b/epub_extended-0.2.3.tar.gz", hash = "sha256:926c1b25d1e132b06a0fb4873758fab8c008887e95b8bb5595657817fd07fc15", size = 84329, upload-time = "2026-10-30T08:49:09.091Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/1d/c49a127af1cc26dc2092b21fe223a0a09a60413b21ffbacdb3d100d40e5c/epub_extended-0.2.2-py3-none-any.whl", hash = "sha256:71e89809365a2a880c890fd92cd3d41663890b8a412fcd6dfd9465061b8a32ee", size = 39643, upload-time = "2026-10-10T02:18:28.024Z" },
+    { url = "https://files.pythonhosted.org/packages/97/9a/673a938106591243796803efd1f32cad6a46322ef2d6bb8aa701eccac4f6/epub_extended-0.2.3-py3-none-any.whl", hash = "sha256:6f67b01def3f2bedd9a4be0cb0c3c48865af0750be3c90cfd378502e67696de7", size = 39789, upload-time = "2026-10-30T08:49:07.786Z" },
 ]
 
 [[package]]
