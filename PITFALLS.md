@@ -4,8 +4,8 @@ Every entry here is a bug that **actually shipped**, found by using the app the
 way it is deployed — in a container, over the LAN, with a real book — and not the
 way the suite runs it. Each one produced plausible-looking behaviour: no
 exception, no console error, and a feature that simply did not do its job — or,
-in entry 3's case, a message that named the symptom and not the cause. The suite
-was green for all of them.
+in entries 3 and 4's case, a message that named the symptom and not the cause.
+The suite was green for all of them.
 
 Read this before changing the front end or the packaging. What the entries share
 is not a subsystem but a *gap*: what the app runs against — the machine, the
@@ -158,6 +158,153 @@ by doing something visible.
 
 ---
 
+## 4. One selection, highlighted twice — a mark that doubled, then vanished
+
+**Provenance: reported by the reader, on a real book.** 自由的窄廊, the
+introduction's heading `受制約的巨靈與持續的競爭紅皇后效應` — two phrases the
+book runs together, so the same five characters were selected twice. The row is
+in the database, the API answered 200, the app said 已保存到数据库 — and the
+reading pane showed one mark where two were saved. Marking it a third time
+changed nothing at all, and the only sign was the passing toast
+「本章有 N 条高亮未能定位」.
+
+Painting is not idempotent. `paint()` walks the chapter's highlights and wraps
+each one's text in a `<mark>`, on a document that already carries the marks the
+earlier ones made — and wrapping text that is already wrapped fails in two
+different ways, neither of them loudly:
+
+```html
+<!-- after the first: -->        <h3>受制約的巨靈與持續的競爭<mark data-highlight-id="55">紅皇后效應</mark></h3>
+<!-- after the second: -->       <mark data-highlight-id="55"><mark data-highlight-id="56">紅皇后效應</mark></mark>
+<!-- and the third threw: -->    InvalidStateError: The Range has partially selected a non-Text node
+```
+
+* the second wrap's range lands on the text node the first mark now holds, so
+  `surroundContents` builds the new mark **inside** the old one. Both paint the
+  same pixels — one band at double the tint — and only the innermost answers a
+  click: the reader sees one highlight where the app says two;
+* `surroundContents` leaves an **empty text node** behind inside the mark it
+  built. The third wrap's range begins in that node and ends inside the nested
+  mark, so the nested mark is *partially contained* in the range — an element
+  holding one end of it but not the other — and the browser refuses it.
+  `wrapText` caught that and returned false: stored, never painted, and counted
+  in 「本章有 N 条高亮未能定位」.
+
+**Fix:** `ReaderCore.markPieces` (`static/js/reader-core.js`) cuts a located run
+into one piece per text node it covers and names the mark each piece already sits
+inside. `wrapText` (`static/js/panel.js`) wraps the whole run in one range as
+before, and falls back to those pieces when a piece is already marked or the
+browser refuses the range. A piece that is already inside a mark is *shared*:
+`shareMark` records the new id on that mark (so 在书中定位 finds it by any of the
+ids it stands for) and makes the newest highlight the one a click opens — which
+is what the nested mark used to be. One mark therefore stands for every highlight
+on that text, and nothing is reported as unlocated.
+
+The same fallback paints a shape that never painted at all: a selection that
+**straddles** an inline element — it begins inside `<small>Hippocrates</small>`
+and ends outside it, or the reverse. Entry 3's forward bias rescues only a
+boundary that lands exactly at a text node's end; one that ends mid-element is a
+partially contained element no bias can fix, and such a run is now wrapped one
+text node at a time (two marks, both of them the highlight's).
+
+**What pins it:**
+`tests/test_browser.py::test_a_selection_highlighted_twice_is_one_mark_and_is_not_lost`
+(three rows on one selection: one mark carrying the newest id and all three ids,
+nothing reported as unlocated, and 在书中定位 reaching it by the *oldest* id),
+`::test_a_highlight_that_straddles_an_inline_element_is_painted` (two marks, both
+the highlight's, spelling out the saved text between them), and the `markPieces`
+unit test in `tests/js/reader-core.test.js`.
+
+**Lesson:** a painting pass is a *set* operation over a document it has already
+painted — the second call sees the first's output. Ask what a re-run does to the
+DOM, not only what a first run does: `surroundContents` nests rather than
+throwing, so the damage stays invisible until a third mark arrives and throws
+somewhere else entirely.
+
+---
+
+## 5. A contents entry for a section did nothing at all
+
+**Provenance: reported by the reader, on a real book.** 自由的窄廊, chapter one,
+9 / 42: clicking 多元化，而非歷史的終結 in the contents left the reading pane exactly
+where it was — measured `scrollY 29050 → 29050` — and the sidebar lit the
+chapter's own entry, 1 歷史如何終結？, for the whole of the chapter. No error, no
+toast, no failed request: the click had run and returned.
+
+The book's headings carry no `id`. Its contents names only its chapters, so
+epubx derives the sections inside each chapter from the document's own headings
+— and takes each entry's label *from the heading's own text*, leaving `anchor:
+None` because there is no id to point at:
+
+```
+OEBPS/ch1.xhtml   <h3>多元化，而非歷史的終結</h3>       ← no id
+{"label": "多元化，而非歷史的終結", "href": "OEBPS/ch1.xhtml", "anchor": null}
+```
+
+Two lines of the shell then had nothing to work with, and each failed
+differently:
+
+```js
+if (node.anchor) link.dataset.anchor = node.anchor;   // no fragment: no data-anchor
+if (index === BOOK.index && !anchor) return;          // …so the same-chapter click returns
+const links = tocList.querySelectorAll(`a[data-anchor][data-path="…"]`);  // measures nothing
+```
+
+* the click was treated as a *chapter* click — already here, nothing asked for,
+  return — so the frame never moved;
+* `frameAnchorInView` measured only entries carrying a fragment, so of the
+  chapter's fourteen entries it could only ever find none, and the highlight
+  fell back to the chapter's own entry for every page of the chapter.
+
+**It was not one book.** Measured over the library: 397 in-chapter entries with
+no id — 自由的窄廊 175, God Created the Integers 134, Death of Caesar 88 — and
+every single one names a heading whose normalised text is the entry's own label
+(no label repeats inside a document). Books whose headings *do* carry ids
+(项狄传 343 entries, Math Formula Test 9) were fine, which is why this looked
+like a single book's oddity rather than a missing case: the ids were the
+assumption, and the fixtures had them.
+
+**Fix:** the label *is* the locator. `ReaderCore.headingForLabel(doc, label)`
+(`static/js/reader-core.js`) finds the heading whose normalised text is the
+entry's label, and `frameTargetElement` (`static/js/reader.js`) resolves an entry
+either way — the id the book gave the heading, or the heading its label names. A
+click inside the chapter on screen is now a `scrollIntoView` on that element
+(the same move the footnote popup's 在注释处打开 already made, and for the same
+reason: re-assigning `frame.src` with only a new fragment does not move every
+browser); an entry in another chapter carries itself across the load
+(`pendingEntry`), and `onFrameLoad` aims the frame after the saved position has
+been restored — which is about the chapter the reader left, not the heading they
+asked for. `frameTargetInView` measures both kinds of entry, so the highlight
+follows the section being read; a heading the frame cannot bring up to the
+reading line — the chapter's last section, with less than a screenful after it —
+is taken as the entry being read once the frame has reached its end.
+
+An entry that names a heading *inside* the document its parent names is the only
+one given a label target: the entry that names the document itself keeps its
+meaning (the fallback when nothing is above the reading line), and a click on it
+still does nothing, because there is nothing more specific to point at.
+
+**What pins it:**
+`tests/test_browser.py::test_a_contents_entry_for_a_section_without_an_id_scrolls_the_chapter`
+(the heading lands at the top of the frame, the entry is `.current`, and a click
+on the chapter's own entry does not move the frame),
+`::test_a_contents_entry_without_an_id_loads_its_chapter_and_lands_on_the_section`
+(the other chapter is loaded *and* the section reached — with both chapters
+naming their sections alike, so the lookup has to happen in the document that
+arrived), `::test_the_contents_highlight_follows_a_section_that_has_no_id` (the
+heading just above the reading line, and then the end of the chapter, where the
+heading is *below* the line and the entry must still be the one lit), the
+`write_unanchored_epub` fixture — a book whose headings carry no id at all, the
+shape no fixture had — and `headingForLabel`'s unit tests.
+
+**Lesson:** a heading without an id is not a target that does not exist, it is a
+target whose *name* is its text — and the outline had already told us so, since
+the label it derives is that very text. Ask what the book carries, not what the
+outline promised: every fixture here gave its headings ids, and 175 of one real
+book's entries were therefore unreachable in a way no test could see.
+
+---
+
 ## Why the suite was green for all of them
 
 None of these is a hole in coverage — every path is tested. Each was tested under
@@ -247,6 +394,10 @@ not only the fixtures.
    paragraph here is one text node; a paragraph there is prose between `<small>`
    and `<sup>`. A range API — `surroundContents` — is where that difference
    surfaces, and it throws rather than telling anyone.
+6. **A missing id is not a missing target.** A book's headings may carry none at
+   all, and its contents then names a section by the heading's own text — the
+   very text the outline took the label from. Look for the identity the book
+   *does* carry before concluding there is nothing to point at (entry 5).
 
 ---
 

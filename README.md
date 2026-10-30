@@ -27,9 +27,11 @@ own test runner — no npm, no build step, no jsdom — and skips them cleanly w
 `tests/test_browser.py` drives the app in a real browser (Playwright) for the
 things a stub DOM cannot see: a toast's *computed* opacity, a saved mark painted
 into the book's own document, a book's own `<script>` not running, a mark on the
-second of two identical sentences, the reading position's block anchor, and the
-two Vue pages' own interactions (the letter index, the stats bar). They skip
-cleanly unless a browser is present:
+second of two identical sentences, one selection saved twice (and a mark that
+straddles an inline element), the reading position's block anchor, a contents
+entry for a section its book gave no id (the jump, and the sidebar highlight
+that follows it), and the two Vue pages' own interactions (the letter index, the
+stats bar). They skip cleanly unless a browser is present:
 
 ```bash
 uv run playwright install chromium     # ~130 MB, once
@@ -42,8 +44,10 @@ against the old request model rejects every save with a 422.
 
 **Status: P4.** A real book renders from its own files: the reader shell loads
 chapters in a sandboxed iframe (render model A — nothing rewritten, nothing
-from the book executes), with the book's own typography, a TOC drawer,
-prev/next and keyboard navigation. Footnotes open from the library's edges
+from the book executes), with the book's own typography, a TOC drawer whose
+entries jump to the section they name — in a book whose headings carry no `id`
+too, where the label is what locates the heading — prev/next and keyboard
+navigation. Footnotes open from the library's edges
 without fetching a rendered page. Highlights, AI analysis and reading progress
 now live on that DOM: select text to explain it (解释说明), discuss it
 (深入讨论) or write a note (个人笔记); each becomes a highlight anchored to the

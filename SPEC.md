@@ -135,6 +135,14 @@ A highlight is stored only with the first analysis it carries: `POST
 /api/ai/save` creates the highlight when the client has none yet, so an
 explanation or discussion the reader never saves leaves no mark in the book.
 
+Painting a chapter is idempotent and never nests. Each stored highlight's text is
+located in the served document and wrapped in a `<mark>`; a mark that already
+covers that text *is* that highlight's mark on the page — it records every id it
+stands for and opens the newest one — and a run the browser will not wrap in a
+single range (one that straddles an inline element, say) is wrapped one text node
+at a time. A highlight that cannot be located is reported
+(本章有 N 条高亮未能定位), never dropped silently (PITFALLS 4).
+
 ### The rendering contract
 
 **Invariant, whichever model is chosen:** the book's files are served at their
@@ -309,7 +317,7 @@ Each phase is independently shippable and verifiable.
 in a sandboxed iframe and rewrites nothing (P2) — that is what makes footnotes,
 images and typography work without a rewriting layer, and it is why every claim
 above is measured against real books rather than fixtures alone. One consequence
-of that choice was left open here; it is now closed, and one remains:
+of that choice was left open here; it is now closed, and two remain:
 
 * **Math is converted by the shell, not by the book** (was: an open trade-off).
   A book's formulas are usually LaTeX, and a script-less frame cannot run the
@@ -331,13 +339,26 @@ of that choice was left open here; it is now closed, and one remains:
   library extracted (measured: matched before the pass, null after it) — and
   复制文本 projects the selection through it, so copying a formula hands the
   reader `$x = \frac{…}$` rather than the characters the browser drew. Still
-  open: a highlight that *spans* a converted formula is not painted — the mark
-  would have to wrap text either side of an element, which
-  `Range.surroundContents` refuses — and the reader says so
+  open, and narrower than the reason it used to give: a highlight that *spans* a
+  converted formula is not painted — not because the wrap refuses to cover text
+  either side of an element (it no longer does; a run is wrapped one text node at
+  a time when it has to be), but because the run's text *is* the MathML the shell
+  drew while the stored selection is the LaTeX the book wrote. `mathText` puts
+  the source back for every block lookup; the wrap does not read through it yet,
+  so the selection is not located at all — and the reader is told
   (本章有 N 条高亮未能定位) rather than losing it.
 * **Dark mode is the shell's, not the book's.** A book whose own CSS sets
   colours keeps them, so the two can disagree on a dark background. Paper mode
   exists for that reason; 书本 mode is the publisher's design, untouched.
+* **The contents aims the frame, not the URL.** A book whose headings carry no
+  `id` gives its sections no fragment to point at — 自由的窄廊 is one: all 175 of
+  its in-chapter entries arrive with `anchor: None` — so the entry's label is
+  what locates the heading, being the very text the outline took the label from.
+  The shell finds it (`ReaderCore.headingForLabel`) and scrolls the frame itself,
+  inside the chapter on screen or across a load. Same reach as painting a
+  highlight or drawing a formula, same limit: a label no heading spells out is
+  nothing to do — no jump, and no error — where a book with ids would have
+  jumped (PITFALLS 5).
 
 Search inside a book is deferred despite being cheap — named rather than
 implied.
