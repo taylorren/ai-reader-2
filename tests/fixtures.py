@@ -245,6 +245,81 @@ def write_sectioned_epub(path) -> Path:
         zf.writestr("OEBPS/ch1.xhtml", SECTIONED_CHAPTER)
     return Path(path)
 
+# The same shape as the sectioned book, except that its headings carry no `id`
+# at all — the publisher's export, and the shape of 自由的窄廊: the contents can
+# name a section only by the heading's own text, so every in-chapter entry
+# arrives with `anchor: None` and its chapter's own href (PITFALLS 5). The last
+# section is deliberately short: its heading cannot be brought up to the reading
+# line, which is the case the highlight's reading-line rule alone gets wrong.
+UNANCHORED_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Unanchored Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:uuid:unanchored-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+    <itemref idref="c2"/>
+  </spine>
+</package>
+"""
+
+UNANCHORED_NAV = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Contents</title></head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <ol>
+      <li><a href="ch1.xhtml">Chapter One</a></li>
+      <li><a href="ch2.xhtml">Chapter Two</a></li>
+    </ol>
+  </nav>
+</body>
+</html>
+"""
+
+UNANCHORED_SECTIONS = ("First Section", "Second Section", "Last Section")
+
+
+def _unanchored_chapter(title: str) -> str:
+    """One chapter whose sections are named only by their own headings."""
+    parts = [f"  <h1>{title}</h1>"]
+    for name in UNANCHORED_SECTIONS:
+        parts.append(f"  <h2>{name}</h2>")
+        # Enough prose to scroll: the reading line is what the highlight measures
+        # against, and a section that fits on one screen would measure nothing.
+        count = 1 if name == UNANCHORED_SECTIONS[-1] else 14
+        for i in range(count):
+            parts.append(
+                f"  <p>{name} of {title}, paragraph {i}: a block of prose long "
+                "enough to be read rather than skimmed, so that the section runs "
+                "past the fold and the reading line has somewhere to be.</p>")
+    return ('<?xml version="1.0" encoding="utf-8"?>\n'
+            '<html xmlns="http://www.w3.org/1999/xhtml">\n'
+            f'<head><title>{title}</title></head>\n<body>\n'
+            + "\n".join(parts) + "\n</body>\n</html>\n")
+
+
+def write_unanchored_epub(path) -> Path:
+    """A book whose contents names sections that its headings give no id to."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", UNANCHORED_OPF)
+        zf.writestr("OEBPS/nav.xhtml", UNANCHORED_NAV)
+        zf.writestr("OEBPS/ch1.xhtml", _unanchored_chapter("Chapter One"))
+        zf.writestr("OEBPS/ch2.xhtml", _unanchored_chapter("Chapter Two"))
+    return Path(path)
+
+
 # A nav that names only the volumes — the shape a Calibre MOBI->EPUB conversion
 # leaves behind: the chapters inside each volume exist only as headings in the
 # volume's own document, so the *declared* contents stops at the volume. The

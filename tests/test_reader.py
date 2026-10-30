@@ -17,7 +17,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fixtures import write_drm_epub, write_epub, write_sectioned_epub  # noqa: E402
+from fixtures import (  # noqa: E402
+    write_drm_epub,
+    write_epub,
+    write_sectioned_epub,
+    write_unanchored_epub,
+)
 
 # Ids a script looks up that the shell cannot carry because the script creates
 # them itself. `reader-math-style` is created in the *frame's* document — it is
@@ -372,6 +377,32 @@ def test_the_shell_hands_over_the_toc_anchors(isolated_client, isolated):
     body = isolated_client.get(f"/read/{slug}/0").text
     assert '"anchor": "sec-a"' in body or '"anchor":"sec-a"' in body
     assert '"anchor": "sec-b"' in body or '"anchor":"sec-b"' in body
+
+
+def test_the_shell_hands_over_the_toc_labels_of_a_book_without_ids(isolated_client,
+                                                                   isolated):
+    """PITFALLS 5's input: a book whose headings carry no id gives its sections
+    no fragment at all — 自由的窄廊's 175 in-chapter entries all arrive with
+    `anchor: None` and their chapter's own href. What is left to tell those
+    entries apart, and to find their headings, is the label: the heading spells
+    out the very text the entry is labelled with, which is what reader.js's
+    `headingForLabel` looks up."""
+    slug = upload(isolated_client, isolated, write_unanchored_epub,
+                  "unanchored.epub")
+    toc = isolated_client.get(f"/api/book/{slug}").json()["toc"]
+    assert [node["label"] for node in toc] == ["Chapter One", "Chapter Two"]
+    chapter = toc[0]
+    assert chapter["href"] == "OEBPS/ch1.xhtml" and chapter["anchor"] is None
+    assert [n["label"] for n in chapter["children"]] == [
+        "First Section", "Second Section", "Last Section"]
+    assert all(n["anchor"] is None for n in chapter["children"])
+    assert all(n["href"] == chapter["href"] for n in chapter["children"])
+
+    # The served chapter really carries no id for the label to be found by,
+    # which is the whole reason the label is the locator.
+    served = isolated_client.get(f"/book/{slug}/OEBPS/ch1.xhtml").text
+    assert "<h2>First Section</h2>" in served
+    assert "id=" not in served.split("<body")[1]
 
 
 def test_the_shell_of_a_later_chapter(isolated_client, isolated):

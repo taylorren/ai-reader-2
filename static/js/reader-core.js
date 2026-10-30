@@ -294,6 +294,36 @@ window.ReaderCore = (function () {
         return null;
     }
 
+    // The heading a contents entry names when the book gave it no id.
+    //
+    // A book whose headings carry no `id` gives its contents nothing to point
+    // at: epubx's outline names the document and takes the section's label from
+    // the heading's own text, so the entry arrives with `anchor: null` — and a
+    // click on it had no target at all, inside its chapter or across one
+    // (PITFALLS 5). The heading is still that entry's target, and its own text
+    // is what names it.
+    //
+    // Measured over the library: every one of the 397 in-chapter entries without
+    // an id names a heading whose normalised text is the entry's label
+    // (自由的窄廊 175, God Created the Integers 134, Death of Caesar 88), and no
+    // label repeats inside one document — so the first match is the entry's own
+    // heading. Compared normalised for the same reason `blockElement` does it:
+    // the label is the publisher's text and the heading is the browser's
+    // (`第一章　歷史如何終結？`, set with U+3000, against `第一章 歷史如何終結？`).
+    //
+    // `doc` is an argument for the same reason `blockElement` takes one: a stub
+    // document is enough to test this.
+    function headingForLabel(doc, label) {
+        const wanted = normalizeText(label);
+        if (!doc || !wanted || typeof doc.querySelectorAll !== "function") {
+            return null;
+        }
+        for (const heading of doc.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+            if (normalizeText(heading.textContent) === wanted) return heading;
+        }
+        return null;
+    }
+
     /* ---- LaTeX: what to render, and what the document then says ----
 
     A book's formulas are often LaTeX, and LaTeX is only text: nothing renders
@@ -434,6 +464,7 @@ window.ReaderCore = (function () {
         findBlockForText,
         blockElement,
         firstVisibleBlockId,
+        headingForLabel,
         findLatexSpans,
         mathText,
         fileURL,

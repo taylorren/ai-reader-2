@@ -22,7 +22,8 @@ test("the module exposes the helpers the shell relies on", () => {
     for (const name of ["escapeHtml", "normalizeText", "normalizedIndex",
                         "offsetToPoint", "textNodes", "markPieces", "textOffset",
                         "findTextRange", "contextAround", "findBlockForText",
-                        "blockElement", "firstVisibleBlockId", "fileURL",
+                        "blockElement", "firstVisibleBlockId", "headingForLabel",
+                        "fileURL",
                         "clampSize", "tocKey", "findLatexSpans", "mathText"]) {
         assert.equal(typeof core[name], "function", name);
     }
@@ -329,6 +330,37 @@ test("blockElement matches a block to the frame's element, whitespace aside", ()
     assert.equal(core.blockElement(doc, { text: "　" }), null);
     assert.equal(core.blockElement(doc, { text: "" }), null);
     assert.equal(core.blockElement(doc, { text: "not in this document" }), null);
+});
+
+test("headingForLabel finds the heading a contents entry names without an id", () => {
+    // PITFALLS 5: 自由的窄廊's headings carry no id, so every section entry in
+    // its contents arrives with `anchor: null` and the same href as its chapter.
+    // The heading's own text is what names it.
+    const headings = [
+        { textContent: "1 歷史如何終結？" },
+        { textContent: "第十五條國家" },
+        { textContent: "多元化，而非歷史的終結" },
+    ];
+    const doc = { querySelectorAll: (selector) => (selector === "h1, h2, h3, h4, h5, h6"
+        ? headings : []) };
+    assert.equal(core.headingForLabel(doc, "多元化，而非歷史的終結"), headings[2]);
+    assert.equal(core.headingForLabel(doc, "1 歷史如何終結？"), headings[0]);
+
+    // Compared normalised: the label is the publisher's text and the heading is
+    // the document's — U+3000 against a space, a wrapped line against one line.
+    const spaced = { querySelectorAll: () => [
+        { textContent: "第一章\u3000歷史如何終結？" }] };
+    assert.ok(core.headingForLabel(spaced, "第一章 歷史如何終結？"));
+    const wrapped = { querySelectorAll: () => [{ textContent: "First Section\n   " }] };
+    assert.ok(core.headingForLabel(wrapped, " First Section "));
+
+    // A label no heading spells out, an empty label, and a document that cannot
+    // be searched: no target, so the caller does nothing rather than guessing.
+    assert.equal(core.headingForLabel(doc, "a section this book never names"), null);
+    assert.equal(core.headingForLabel(doc, ""), null);
+    assert.equal(core.headingForLabel(doc, null), null);
+    assert.equal(core.headingForLabel(null, "anything"), null);
+    assert.equal(core.headingForLabel({}, "anything"), null);
 });
 
 test("fileURL encodes each path segment and the anchor", () => {

@@ -46,6 +46,7 @@ from fixtures import (  # noqa: E402
     write_long_epub,
     write_repeated_epub,
     write_scripted_epub,
+    write_unanchored_epub,
 )
 
 
@@ -417,6 +418,168 @@ def test_a_stored_block_anchor_is_where_the_reader_returns(browser, base_url, is
             assert landed, "the percent fallback did not land where the percent asked"
         finally:
             context.close()
+    finally:
+        page.close()
+
+
+def test_a_contents_entry_for_a_section_without_an_id_scrolls_the_chapter(
+        browser, base_url, isolated):
+    """PITFALLS 5: 自由的窄廊's headings carry no id, so every one of its 175
+    in-chapter entries arrived with `anchor: None` and its chapter's own href —
+    and a click on one did nothing at all: `load()` returned early for a
+    same-chapter click that asked for no anchor, and there was no target to
+    scroll to in the first place.
+
+    Measured before the fix, on the reported book: `scrollY 29050 → 29050`, and
+    the sidebar lit the chapter's own entry for the whole of chapter one. The
+    entry's own label is what names the heading, and the frame is scrolled to it
+    directly — a fragment navigation is not available, and re-assigning
+    `frame.src` with a fragment is not what moves every browser anyway.
+    """
+    slug = upload_book(base_url, write_unanchored_epub(isolated / "unanchored.epub"))
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("h1").wait_for()
+        # The shell's own record of what the entry points at: a label, no
+        # fragment. Without it the entry has no target at all.
+        section = page.locator(
+            '#toc-list a[data-path="OEBPS/ch1.xhtml"][data-heading="Second Section"]')
+        assert section.get_attribute("data-anchor") is None
+        assert frame.locator("h2", has_text="Second Section").first.evaluate(
+            "node => Math.round(node.getBoundingClientRect().top)") > 100, \
+            "the fixture must have to scroll to reach the section"
+
+        section.click()
+        page.wait_for_function(
+            """() => { const win = document.querySelector('#chapter-frame').contentWindow;
+                       const heading = [...win.document.querySelectorAll('h2')]
+                           .find(h => h.textContent === 'Second Section');
+                       return heading && Math.abs(heading.getBoundingClientRect().top) <= 1; }""")
+        assert frame.locator("h2", has_text="Second Section").first.evaluate(
+            "() => window.pageYOffset") > 0
+        # The entry the reader asked for is the one the sidebar shows, which is
+        # the other half of what was broken: the highlight could not follow a
+        # heading the book gave no id to.
+        assert page.locator("#toc-list a.current").inner_text() == "Second Section"
+
+        # The entry that names the chapter itself has nothing to aim at: a click
+        # on it neither moves the frame nor reloads it.
+        at = frame.locator("h2").first.evaluate("() => window.pageYOffset")
+        page.locator("#toc-list a", has_text="Chapter One").first.click()
+        page.wait_for_timeout(300)
+        assert frame.locator("h2").first.evaluate("() => window.pageYOffset") == at
+    finally:
+        page.close()
+
+
+def test_a_contents_entry_without_an_id_loads_its_chapter_and_lands_on_the_section(
+        browser, base_url, isolated):
+    """The other half of PITFALLS 5: the entry is in a chapter that is not on
+    screen, so the chapter has to be loaded — and the heading aimed at once it
+    is, because there is no fragment to put in the frame's URL. The saved
+    position restoreScroll() applies on the way in is about the chapter the
+    reader left, not the heading they asked for.
+
+    The two chapters name their sections alike on purpose: the label is looked
+    up in the document that was loaded, so it is the second chapter's heading
+    that must be found.
+    """
+    slug = upload_book(base_url, write_unanchored_epub(isolated / "unanchored.epub"))
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("h1").wait_for()
+        # A collapsed branch hides its children, as a reader would find it.
+        page.locator("#toc-list a", has_text="Chapter Two").first.click()
+        page.wait_for_timeout(600)
+        assert page.locator("#top-position").inner_text() == "2 / 2"
+
+        page.locator(
+            '#toc-list a[data-path="OEBPS/ch2.xhtml"][data-heading="First Section"]'
+        ).click()
+        page.wait_for_function(
+            """() => { const win = document.querySelector('#chapter-frame').contentWindow;
+                       if (!win.location.pathname.endsWith('ch2.xhtml')) return false;
+                       const heading = [...win.document.querySelectorAll('h2')]
+                           .find(h => h.textContent === 'First Section');
+                       return heading && Math.abs(heading.getBoundingClientRect().top) <= 1; }""")
+        assert page.locator("#toc-list a.current").inner_text() == "First Section"
+    finally:
+        page.close()
+
+
+def test_the_contents_highlight_follows_a_section_that_has_no_id(
+        browser, base_url, isolated):
+    """PITFALLS 5, the highlight: the sidebar used to sit on the chapter's own
+    entry for the whole of a chapter of 自由的窄廊, because the entries naming
+    its sections had nothing to measure.
+
+    The last part is the end of the chapter: a section with less than a
+    screenful of text after it cannot be brought up to the reading line, and the
+    heading the reader is looking at must still be the entry that is lit — the
+    reading line alone would name the section before it.
+    """
+    slug = upload_book(base_url, write_unanchored_epub(isolated / "unanchored.epub"))
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        frame = page.frame_locator("#chapter-frame")
+        frame.locator("h1").wait_for()
+        assert page.locator("#toc-list a.current").inner_text() == "Chapter One"
+
+        def scroll_to(fraction):
+            page.evaluate("""(fraction) => {
+                const win = document.querySelector('#chapter-frame').contentWindow;
+                const max = win.document.documentElement.scrollHeight - win.innerHeight;
+                win.scrollTo(0, Math.round(max * fraction));
+            }""", fraction)
+
+        # A heading just above the reading line is the section being read. The
+        # line is what the measurement uses, so the test puts the heading there
+        # itself rather than guessing at a fraction of the chapter.
+        def put_heading_at_the_line(name):
+            page.evaluate("""(name) => {
+                const win = document.querySelector('#chapter-frame').contentWindow;
+                const heading = [...win.document.querySelectorAll('h2')]
+                    .find(h => h.textContent === name);
+                const line = win.innerHeight * 0.3;
+                win.scrollTo(0, Math.round(heading.getBoundingClientRect().top
+                                           + win.pageYOffset - line + 10));
+            }""", name)
+
+        put_heading_at_the_line("Second Section")
+        page.wait_for_function(
+            "() => document.querySelector('#toc-list a.current').textContent"
+            "      === 'Second Section'")
+        top, line = page.evaluate("""() => {
+            const win = document.querySelector('#chapter-frame').contentWindow;
+            const heading = [...win.document.querySelectorAll('h2')]
+                .find(h => h.textContent === 'Second Section');
+            return [Math.round(heading.getBoundingClientRect().top),
+                    Math.round(win.innerHeight * 0.3)];
+        }""")
+        assert top <= line, f"the heading is at {top}, below the line at {line}"
+
+        scroll_to(1.0)
+        page.wait_for_function(
+            "() => document.querySelector('#toc-list a.current').textContent"
+            "      === 'Last Section'")
+        # Why the reading line alone would have got this wrong: the frame is at
+        # its end and the heading sits below the line, not above it.
+        heading_top, line = page.evaluate("""() => {
+            const win = document.querySelector('#chapter-frame').contentWindow;
+            const heading = [...win.document.querySelectorAll('h2')]
+                .find(h => h.textContent === 'Last Section');
+            return [Math.round(heading.getBoundingClientRect().top),
+                    Math.round(win.innerHeight * 0.3)];
+        }""")
+        assert heading_top > line, f"the heading is at {heading_top}, the line at {line}"
     finally:
         page.close()
 

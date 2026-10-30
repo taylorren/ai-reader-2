@@ -6,7 +6,7 @@
 // The pure helpers live in reader-core.js (loaded first), shared with
 // panel.js and unit-tested in Node — REVIEW T1.
 const { clampSize, fileURL, tocKey, blockElement, firstVisibleBlockId,
-        findLatexSpans } = window.ReaderCore;
+        headingForLabel, findLatexSpans } = window.ReaderCore;
 
 const app = document.getElementById("reader-app");
 const frame = document.getElementById("chapter-frame");
@@ -38,20 +38,36 @@ const state = {
 // bailed before wiring the panel. Compare decoded paths instead.
 const bookPrefix = "/book/" + BOOK.slug + "/";
 
-// The heading the reader asked for but the frame has not reached yet. A TOC
-// click changes `frame.src` while the old document is still on screen, so the
-// in-view heading cannot be measured at that instant: this carries the choice
-// until the new chapter's `load` lands — or the reader scrolls away from it.
-let pendingAnchor = null;
+// The contents entry the reader clicked, until the frame reaches it. A click
+// that changes `frame.src` leaves the old document on screen, so the heading
+// asked for cannot be measured at that instant — and an entry that names a
+// heading the book gave no id has no fragment to carry that aim in the frame's
+// URL, so the entry itself has to travel: it keeps the sidebar lit across the
+// load, and `onFrameLoad` aims the frame at it once the chapter is in it.
+let pendingEntry = null;
 
-function load(index, anchor) {
+/* Move to a chapter, optionally aiming at one of its headings.
+
+`target` is what a contents entry names: `anchor` — the id the book gave the
+heading — or, a book that gave it none, `label`, which the heading carries as
+its own text (ReaderCore.headingForLabel) — plus `link`, the entry itself. A
+heading's id is a fragment the frame's URL can carry; a label is not, so the
+shell aims the frame itself. */
+function load(index, target = {}) {
+    const { anchor, label, link } = target;
     index = Math.max(0, Math.min(BOOK.spine.length - 1, index));
-    // Already here, with no heading asked for: re-loading the frame would flash
-    // the chapter and write a progress row for a move that never happened. The
-    // nav buttons are disabled at the ends for the same reason — and the arrow
-    // keys reach those ends too (REVIEW P1-5). An anchor still proceeds: a TOC
-    // entry inside the chapter on screen is a jump within it.
-    if (index === BOOK.index && !anchor) return;
+    // Already here: the entry names a heading inside the chapter on screen, so
+    // the frame is scrolled to it directly and nothing is loaded — a fragment
+    // navigation is not the way either (re-assigning `frame.src` with only a new
+    // fragment does not move every browser). A chapter entry that names no
+    // heading has nothing to do at all: re-loading the frame would flash the
+    // chapter and write a progress row for a move that never happened. The nav
+    // buttons are disabled at the ends for the same reason — and the arrow keys
+    // reach those ends too (REVIEW P1-5).
+    if (index === BOOK.index) {
+        jumpToTarget(anchor, label);
+        return;
+    }
     // Record where the reader was in the chapter they are leaving, *before* the
     // index moves: `lastPercentByChapter` is what restoreScroll() consults, and
     // the 0 written for the chapter being entered must not erase the chapter
@@ -60,7 +76,9 @@ function load(index, anchor) {
         ? lastPercentByChapter.get(BOOK.index)
         : frameScrollPercent());
     BOOK.index = index;
-    pendingAnchor = anchor || null;
+    // The entry asked for, across the load — and the fragment, when the book
+    // gave the heading an id for the frame's URL to carry.
+    pendingEntry = link || null;
     frame.src = fileURL(BOOK.slug, BOOK.spine[index], anchor);
     if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
     // The chapter being entered: 0 when the session knows nothing about it, and
@@ -88,11 +106,11 @@ function mark() {
 
 /* The TOC highlight follows the heading, not merely the chapter. A book's
    contents usually names sections *inside* one document: epubx splits the nav
-   href, so those entries share the chapter's `href` and differ only in the
-   fragment it hands over as `anchor` (nav.py). Several links therefore carry
-   one `data-path`, and a plain path lookup always finds the first — the
-   chapter's own entry. Measure instead: of this chapter's anchored entries,
-   the last heading above the reading line is the one being read. */
+   href, so those entries share the chapter's `href` and differ only in what
+   they point at inside it — the fragment it hands over as `anchor` (nav.py), or,
+   for a book whose headings carry no id at all, the label the heading itself
+   spells out. Measure instead: of this chapter's entries, the last heading above
+   the reading line is the one being read. */
 
 const TOC_READING_LINE = 0.3; // fraction of the viewport a heading owns
 
@@ -101,24 +119,58 @@ function frameAnchorElement(doc, anchor) {
     return doc.getElementById(anchor) || doc.getElementsByName(anchor)[0] || null;
 }
 
-function frameAnchorInView(path) {
+/* The element a contents entry names in the frame's own document: the heading
+   the book gave an id to, or — a book that gave it none — the heading whose own
+   text is the entry's label. Null when the document carries neither, which is
+   how an anchor the book never wrote is treated everywhere here. */
+function frameTargetElement(doc, anchor, label) {
+    if (!doc || !doc.body) return null;
+    if (anchor) return frameAnchorElement(doc, anchor);
+    return headingForLabel(doc, label);
+}
+
+/* Aim the frame at a target inside the chapter already on screen, and light the
+   entry that names it. Returns whether the document defines it: a target it does
+   not is nothing to do rather than a reason to load something. */
+function jumpToTarget(anchor, label) {
+    const target = frameTargetElement(frameDocument(), anchor, label);
+    if (!target) return false;
+    pendingEntry = null;          // the frame is where the reader asked
+    target.scrollIntoView({ block: "start" });
+    syncTocHighlight();
+    return true;
+}
+
+// The entry being read: of this chapter's entries, the last heading above the
+// reading line. Entries whose target the document never defines are stepped
+// over, and the chapter's own entry — the first link naming this document — is
+// what is left when nothing is above the line.
+function frameTargetInView(path) {
     const doc = frameDocument();
     if (!doc || !doc.body) return null;
-    let line;
+    let line, innerHeight, atEnd;
     try {
-        line = (frame.contentWindow.innerHeight || 0) * TOC_READING_LINE;
+        const win = frame.contentWindow;
+        innerHeight = win.innerHeight || 0;
+        line = innerHeight * TOC_READING_LINE;
+        // A heading the frame cannot bring up to the line — the chapter's last
+        // section, with less than a screenful of text after it — is the one being
+        // read once the frame has reached its end. Measured rather than
+        // remembered, so the highlight is right however the reader got there.
+        const max = doc.documentElement.scrollHeight - innerHeight;
+        atEnd = max > 0 && win.scrollY >= max - 1;
     } catch {
         return null; // opaque origin: nothing to measure
     }
     let inView = null;
     const links = tocList.querySelectorAll(
-        `a[data-anchor][data-path="${CSS.escape(path)}"]`);
+        `a[data-anchor][data-path="${CSS.escape(path)}"], `
+        + `a[data-heading][data-path="${CSS.escape(path)}"]`);
     for (const link of links) {
-        const target = frameAnchorElement(doc, link.dataset.anchor);
-        if (!target) continue; // an anchor the book never defines
-        if (target.getBoundingClientRect().top <= line) {
-            inView = link.dataset.anchor;
-        }
+        const target = frameTargetElement(doc, link.dataset.anchor, link.dataset.heading);
+        if (!target) continue;
+        const top = target.getBoundingClientRect().top;
+        if (top <= line || (atEnd && top <= innerHeight)) inView = link;
     }
     return inView;
 }
@@ -128,16 +180,11 @@ function syncTocHighlight() {
     if (!path) return;
     const links = tocList.querySelectorAll(`a[data-path="${CSS.escape(path)}"]`);
     if (!links.length) return;
-    const wanted = pendingAnchor || frameAnchorInView(path);
-    let active = null;
-    for (const link of links) {
-        const anchor = link.dataset.anchor || "";
-        if (wanted && anchor === wanted) { active = link; break; }
-        // No heading in view — or an anchor the book never defines: the
-        // chapter's own entry, the link that names no fragment.
-        if (!active && !anchor) active = link;
-    }
-    active = active || links[0];
+    // The entry a click asked for wins until the frame reaches it — its own
+    // scroll clears the choice (queueTocSync) — and the reading line decides
+    // otherwise. The chapter's own entry is the fallback: the first link naming
+    // this document, which is the one that owns it in the outline.
+    const active = pendingEntry || frameTargetInView(path) || links[0];
     const previous = tocList.querySelector("a.current");
     if (previous === active) return;
     // The entry being read must be visible: open its branch and the branches
@@ -197,19 +244,26 @@ function revealEntry(link) {
     }
 }
 
-function tocLabel(node) {
+function tocLabel(node, parentHref) {
     if (node.href && BOOK.spine.includes(node.href)) {
         const link = document.createElement("a");
         link.href = "#";
         link.dataset.path = node.href;
-        // A fragment on this chapter's own file: the section's marker.
-        // Chapter entries name no fragment and stay the fallback.
+        // What the entry points at inside that document. An entry that names a
+        // heading *inside* the document its parent names is a section: the
+        // fragment the book wrote for it, or — a book whose headings carry no id
+        // — the label the heading itself spells out. The entry that names the
+        // document is not a section and points at nothing more specific.
+        const section = Boolean(node.anchor)
+            || Boolean(parentHref && node.href === parentHref);
         if (node.anchor) link.dataset.anchor = node.anchor;
+        else if (section && node.label) link.dataset.heading = node.label;
         link.textContent = node.label || node.href;
         const index = BOOK.spine.indexOf(node.href);
         link.onclick = (event) => {
             event.preventDefault();
-            load(index, node.anchor);
+            load(index, { anchor: node.anchor || null,
+                          label: link.dataset.heading || null, link });
         };
         return link;
     }
@@ -218,7 +272,10 @@ function tocLabel(node) {
     return span;
 }
 
-function buildTocList(nodes, expanded) {
+// `parentHref` is the href of the entry this one hangs under, so a section —
+// an entry naming a heading inside the document its parent names — can be told
+// from the entry that names the document itself (see tocLabel).
+function buildTocList(nodes, expanded, parentHref) {
     const ul = document.createElement("ul");
     ul.className = "toc-children";
     for (const node of nodes) {
@@ -250,16 +307,18 @@ function buildTocList(nodes, expanded) {
             row.appendChild(spacer);
         }
 
-        row.appendChild(tocLabel(node));
+        row.appendChild(tocLabel(node, parentHref));
         li.appendChild(row);
-        if (children.length) li.appendChild(buildTocList(children, expanded));
+        if (children.length) {
+            li.appendChild(buildTocList(children, expanded, node.href));
+        }
         ul.appendChild(li);
     }
     return ul;
 }
 
 function renderToc(nodes, container) {
-    container.appendChild(buildTocList(nodes, loadExpanded()));
+    container.appendChild(buildTocList(nodes, loadExpanded(), null));
 }
 
 function applySidebar() {
@@ -800,7 +859,7 @@ function queueTocSync() {
         tocSyncQueued = false;
         // The reader scrolled: the reading line decides the highlight now, not
         // the entry a click asked for (whose scroll may already have passed).
-        pendingAnchor = null;
+        pendingEntry = null;
         syncTocHighlight();
     });
 }
@@ -1024,17 +1083,10 @@ function showPopup(anchor, edge) {
             const index = BOOK.spine.indexOf(edge.target_href);
             const chapter = index >= 0 ? index : edge.target_chapter;
             // A note in the chapter already on screen is reached by scrolling
-            // the frame directly: re-assigning the iframe's src with only a
-            // new fragment does not move every browser, and there is nothing
-            // to load. Any other chapter goes through the normal load.
-            const doc = chapter === BOOK.index ? frameDocument() : null;
-            const target = doc && edge.target_anchor
-                ? frameAnchorElement(doc, edge.target_anchor) : null;
-            if (target) {
-                target.scrollIntoView({ block: "start" });
-                return;
-            }
-            load(chapter, edge.target_anchor);
+            // the frame directly (jumpToTarget); any other chapter goes through
+            // the normal load.
+            if (chapter === BOOK.index && jumpToTarget(edge.target_anchor)) return;
+            load(chapter, { anchor: edge.target_anchor });
         });
         footnotePopup.appendChild(open);
     }
@@ -1336,10 +1388,17 @@ function onFrameLoad() {
     wireImages();   // images pop out into the shell at their own size
     loadEdges();    // library-classified edges wire when they arrive
     ReaderPanel.onFrameLoad();  // selection + saved highlights for this chapter
-    // The requested anchor is the frame's own scroll now; a cached chapter can
-    // settle late (images push the headings down), so aim the highlight once
-    // more after the layout has had a moment.
-    pendingAnchor = null;
+    // The entry a click asked for: aimed here, once the chapter is in the frame
+    // — a heading the book gave no id has no fragment to carry that aim in the
+    // URL, and the saved position restoreScroll() just applied is about the
+    // chapter the reader left rather than the heading they asked for. A cached
+    // chapter can settle late (images push the headings down), so the highlight
+    // is aimed once more after the layout has had a moment.
+    if (pendingEntry) {
+        const entry = pendingEntry;
+        pendingEntry = null;
+        jumpToTarget(entry.dataset.anchor, entry.dataset.heading);
+    }
     syncTocHighlight();
     setTimeout(syncTocHighlight, 350);
 }
