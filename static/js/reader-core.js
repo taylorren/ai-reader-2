@@ -94,6 +94,50 @@ window.ReaderCore = (function () {
         return nodes;
     }
 
+    // The reader mark a text node already sits inside, or null. Walked by hand
+    // rather than with `closest`: a text node's `parentElement` can be null (the
+    // document itself), and the stub nodes the unit tests use carry only the
+    // chain they are given.
+    function enclosingMark(node) {
+        let element = node.parentElement;
+        while (element) {
+            if (element.classList &&
+                element.classList.contains("reader-highlight")) {
+                return element;
+            }
+            element = element.parentElement;
+        }
+        return null;
+    }
+
+    // A located run as the pieces a wrap can take: one per text node it covers,
+    // cut at the run's own ends. Each piece is `{node, at, length, mark}`, where
+    // `mark` is the reader mark that piece already sits inside — null for bare
+    // text.
+    //
+    // A `Range` cannot wrap the same characters twice, and it refuses a range
+    // that *partially contains* an element — one holding an end of the range but
+    // not the other — so the whole run cannot always be wrapped in one go, and
+    // these pieces are what the caller falls back to. They are also how a
+    // highlight learns that it is already on the page: a piece carrying a mark is
+    // handed to that mark rather than wrapped again, which is what the second and
+    // third highlights on one selection need (PITFALLS 4).
+    function markPieces(nodes, at, length) {
+        const pieces = [];
+        let position = 0;
+        for (const node of nodes) {
+            const nodeLength = node.nodeValue.length;
+            const from = Math.max(at, position);
+            const to = Math.min(at + length, position + nodeLength);
+            if (to > from) {
+                pieces.push({ node, at: from - position, length: to - from,
+                              mark: enclosingMark(node) });
+            }
+            position += nodeLength;
+        }
+        return pieces;
+    }
+
     // Where a range point sits in the concatenated text of those nodes — or null
     // when it is not one of them, which is what a range starting at an element
     // boundary looks like.
@@ -383,6 +427,7 @@ window.ReaderCore = (function () {
         normalizedIndex,
         offsetToPoint,
         textNodes,
+        markPieces,
         textOffset,
         findTextRange,
         contextAround,

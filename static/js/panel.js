@@ -12,7 +12,7 @@ window.ReaderPanel = (function () {
     // The pure helpers, shared with reader.js and unit-tested in Node
     // (static/js/reader-core.js, REVIEW T1).
     const { escapeHtml, findTextRange, contextAround, textNodes, offsetToPoint,
-            findBlockForText, blockElement, mathText } = window.ReaderCore;
+            markPieces, findBlockForText, blockElement, mathText } = window.ReaderCore;
 
     const KIND_LABELS = {
         fact_check: "解释说明",
@@ -856,29 +856,15 @@ window.ReaderPanel = (function () {
         }
     }
 
-    function wrapText(doc, root, text, highlight) {
-        const nodes = textNodes(doc, root);
-        const full = nodes.map((item) => item.nodeValue).join("");
-        // Which occurrence, when the block repeats the text: the context saved
-        // with the selection decides (REVIEW P2-10).
-        const found = findTextRange(full, text,
-                                    highlight.context_before, highlight.context_after);
-        if (!found) return false;
-        // The start is biased forward when it lands on a node boundary: a
-        // selection that begins right after an inline element (项狄传's
-        // `<small>希波克拉底</small>Ars longa…`) would otherwise start inside
-        // that element and `surroundContents` would refuse the range — the mark
-        // was stored and never painted. The end keeps the boundary's default,
-        // which stays in the node it closes.
-        const start = offsetToPoint(nodes, found.at, true);
-        const end = offsetToPoint(nodes, found.at + found.length);
-        if (!start || !end) return false;
-        const range = doc.createRange();
-        range.setStart(start.node, start.offset);
-        range.setEnd(end.node, end.offset);
+    // The <mark> for one range — one band on the page. False when the browser
+    // refuses the range: `surroundContents` will not accept one that *partially
+    // contains* a node — an element holding one end of the range but not the
+    // other — and it throws rather than telling anyone.
+    function paintRange(doc, range, highlight) {
         const mark = doc.createElement("mark");
         mark.className = "reader-highlight hl-" + (highlight.kind || "highlight");
         mark.dataset.highlightId = highlight.id;
+        mark.dataset.highlightIds = String(highlight.id);
         mark.title = KIND_LABELS[highlight.kind] || "高亮";
         // The colour is set inline with `important`, so a book whose own CSS
         // paints every <mark>/<small>/<b> cannot hide the highlight.
@@ -887,10 +873,81 @@ window.ReaderPanel = (function () {
         try {
             range.surroundContents(mark);
         } catch (error) {
-            return false;   // a selection crossing elements: leave it unpainted
+            return false;
         }
-        mark.addEventListener("click", () => showHighlight(highlight.id));
+        // The id is read when the mark is clicked, not captured here: a mark that
+        // stands for several highlights is opened by the newest of them (see
+        // `shareMark`), so the id it carries changes after this listener exists.
+        mark.addEventListener("click",
+            () => showHighlight(Number(mark.dataset.highlightId)));
         return true;
+    }
+
+    // The highlight shares a mark that already covers its text, instead of
+    // nesting a second mark inside it. The newest highlight becomes what a click
+    // opens — the one the nested wrap used to leave reachable — and every id
+    // stays on the mark, so 在书中定位 finds it by any of them.
+    function shareMark(mark, highlight) {
+        const ids = String(mark.dataset.highlightIds || "")
+            .split(" ").filter(Boolean);
+        const id = String(highlight.id);
+        if (!ids.includes(id)) ids.push(id);
+        mark.dataset.highlightIds = ids.join(" ");
+        mark.dataset.highlightId = id;
+    }
+
+    function wrapText(doc, root, text, highlight) {
+        const nodes = textNodes(doc, root);
+        const full = nodes.map((item) => item.nodeValue).join("");
+        // Which occurrence, when the block repeats the text: the context saved
+        // with the selection decides (REVIEW P2-10).
+        const found = findTextRange(full, text,
+                                    highlight.context_before, highlight.context_after);
+        if (!found) return false;
+        const pieces = markPieces(nodes, found.at, found.length);
+        if (!pieces.length) return false;
+        // The ordinary case: the whole run in one range, which is one mark and
+        // one band. A piece that already sits inside a mark rules it out —
+        // wrapping over it nests the new mark inside the old one (both paint the
+        // same pixels, so the reader saw one mark), and a third highlight then
+        // throws `InvalidStateError`: its range begins in the empty text node the
+        // first wrap left behind, inside the outer mark, and ends inside the
+        // inner one (PITFALLS 4).
+        //
+        // The start is biased forward when it lands on a node boundary: a
+        // selection that begins right after an inline element (项狄传's
+        // `<small>希波克拉底</small>Ars longa…`) would otherwise start inside
+        // that element and `surroundContents` would refuse the range. The end
+        // keeps the boundary's default, which stays in the node it closes.
+        if (pieces.every((piece) => !piece.mark)) {
+            const start = offsetToPoint(nodes, found.at, true);
+            const end = offsetToPoint(nodes, found.at + found.length);
+            if (start && end) {
+                const range = doc.createRange();
+                range.setStart(start.node, start.offset);
+                range.setEnd(end.node, end.offset);
+                if (paintRange(doc, range, highlight)) return true;
+            }
+        }
+        // Otherwise the pieces, one mark each: a piece that is already marked is
+        // shared, a piece that is not is wrapped on its own. This is also the
+        // fallback for a run the browser refuses above — a selection that
+        // *straddles* an inline element, beginning inside it and ending outside
+        // it (or the reverse), which is a partially contained element and no
+        // bias of the start can rescue.
+        let painted = 0;
+        for (const piece of pieces) {
+            if (piece.mark) {
+                shareMark(piece.mark, highlight);
+                painted += 1;
+                continue;
+            }
+            const range = doc.createRange();
+            range.setStart(piece.node, piece.at);
+            range.setEnd(piece.node, piece.at + piece.length);
+            if (paintRange(doc, range, highlight)) painted += 1;
+        }
+        return painted > 0;
     }
 
     function paint(blocks, highlights) {
@@ -937,7 +994,9 @@ window.ReaderPanel = (function () {
         if (!target) return;
         const doc = frameEl().contentDocument;
         if (!doc) return;
-        const mark = doc.querySelector(`mark[data-highlight-id="${target}"]`);
+        const mark = doc.querySelector(
+            `mark[data-highlight-id="${target}"], ` +
+            `mark[data-highlight-ids~="${target}"]`);
         if (!mark) {
             // The frame may still be loading — a cached chapter can beat the
             // shell's script, in which case its `load` event fired before the

@@ -678,6 +678,93 @@ def test_a_mark_that_begins_after_an_inline_element_is_painted(
         page.close()
 
 
+def test_a_selection_highlighted_twice_is_one_mark_and_is_not_lost(
+        browser, base_url, upload):
+    """Two stored highlights on one selection: one mark on the page, neither lost.
+
+    Reported by the reader, on 自由的窄廊 — a heading whose two phrases run
+    together (`受制約的巨靈與持續的競爭紅皇后效應`), so the same five characters
+    were selected twice. The row is in the database, the API answered 200, the app
+    says 已保存到数据库, and the reading pane shows one mark where two were saved —
+    while the third save paints nothing at all:
+
+    * the second wrap *nested* the new mark inside the first, so both painted the
+      same pixels: one visible mark, the innermost clickable;
+    * the third threw `InvalidStateError` — `surroundContents` leaves an empty
+      text node inside the mark it builds, the new range began there and ended
+      inside the nested mark, which was therefore *partially contained* in the
+      range, and the wrap refused it. Stored, never painted, and reported as
+      「本章有 N 条高亮未能定位」.
+
+    One mark now stands for every highlight on that text: it carries the newest
+    id (what a click opens), every id it stands for, and nothing is reported as
+    unlocated. Seeded rather than driven through the UI — saving twice is what a
+    reader does, but the AI and the clipboard are not what broke.
+    """
+    slug = upload()
+    payload = chapter_payload(base_url, slug)
+    block = block_named(payload["blocks"], "The first paragraph mentions")
+    snippet = "and then keeps going for a while"
+    ids = [seed_highlight(base_url, slug, snippet, block["id"]) for _ in range(3)]
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        marks = page.frame_locator("#chapter-frame").locator("mark.reader-highlight")
+        marks.first.wait_for()
+        assert marks.count() == 1, "one selection is one mark on the page"
+        mark = marks.first
+        assert collapsed(mark.inner_text()) == collapsed(snippet)
+        assert mark.get_attribute("data-highlight-id") == str(ids[-1]), (
+            "the mark is opened by the newest highlight on that text")
+        assert mark.get_attribute("data-highlight-ids").split() == [
+            str(item) for item in ids], "every id the mark stands for is on it"
+        assert "未能定位" not in page.locator("#toast").inner_text()
+
+        # 在书中定位 reaches the mark by *any* id it stands for, so the oldest of
+        # the three rows still finds it — and flashes it.
+        page.goto(f"{base_url}/read/{quote(slug)}/0?highlight={ids[0]}")
+        page.wait_for_function(
+            "() => document.getElementById('chapter-frame').contentDocument"
+            ".querySelector('mark.reader-highlight.flash') !== null")
+    finally:
+        page.close()
+
+
+def test_a_highlight_that_straddles_an_inline_element_is_painted(
+        browser, base_url, isolated):
+    """A selection that begins inside an inline element and ends outside it.
+
+    `Range.surroundContents` refuses a range that *partially contains* a node —
+    an element holding one end of the range but not the other — so this shape was
+    stored and never painted, and the reader was told 「本章有 N 条高亮未能定位」
+    about a highlight that was in the database all along. The forward bias in
+    `offsetToPoint` rescues a boundary that lands exactly at a text node's end
+    (the 项狄传 case, the test above); a selection that ends mid-element has no
+    such boundary. The wrap now falls back to the run's pieces — one mark per
+    text node it covers, all carrying the highlight's id.
+    """
+    slug = upload_book(base_url, write_inline_epub(isolated / "inline.epub"))
+    payload = chapter_payload(base_url, slug)
+    block = next(item for item in payload["blocks"] if "Ars longa" in item["text"])
+    # Begins inside `<small>Hippocrates</small>` and ends in the paragraph.
+    snippet = "ippocratesArs longa"
+    highlight_id = seed_highlight(base_url, slug, snippet, block["id"])
+
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/read/{quote(slug)}/0")
+        marks = page.frame_locator("#chapter-frame").locator("mark.reader-highlight")
+        marks.first.wait_for()
+        assert marks.count() == 2, "one mark per text node the selection covers"
+        assert [mark.get_attribute("data-highlight-id") for mark in marks.all()] == \
+            [str(highlight_id)] * 2
+        assert collapsed("".join(marks.all_inner_texts())) == collapsed(snippet)
+        assert "未能定位" not in page.locator("#toast").inner_text()
+    finally:
+        page.close()
+
+
 def test_the_copy_action_copies_where_the_clipboard_api_is_absent(
         browser, base_url, isolated):
     """复制文本 on the deployment that actually exists: plain http on a LAN.
@@ -1015,4 +1102,5 @@ def test_a_chapter_without_formulas_fetches_no_renderer(browser, base_url, isola
     finally:
         page.close()
     assert [url for url in fetched if "temml" in url] == []
+
 

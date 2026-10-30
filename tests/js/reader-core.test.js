@@ -20,7 +20,7 @@ const core = new Function("window", `${source}\nreturn window.ReaderCore;`)({});
 
 test("the module exposes the helpers the shell relies on", () => {
     for (const name of ["escapeHtml", "normalizeText", "normalizedIndex",
-                        "offsetToPoint", "textNodes", "textOffset",
+                        "offsetToPoint", "textNodes", "markPieces", "textOffset",
                         "findTextRange", "contextAround", "findBlockForText",
                         "blockElement", "firstVisibleBlockId", "fileURL",
                         "clampSize", "tocKey", "findLatexSpans", "mathText"]) {
@@ -108,6 +108,31 @@ test("offsetToPoint can resolve a boundary forward, for a range start", () => {
     assert.equal(core.offsetToPoint(nodes, 4, true).offset, 1);
     assert.equal(core.offsetToPoint(nodes, 0, true).node, nodes[0]);
     assert.equal(core.offsetToPoint(nodes, 0, true).offset, 0);
+});
+
+test("markPieces cuts a run at the text nodes and names the mark each sits in", () => {
+    // A run over the middle of the first node, all of the second and the start
+    // of the third: three pieces, each inside one text node — what a wrap has to
+    // fall back to when it cannot take the run in one range.
+    const mark = { classList: { contains: (name) => name === "reader-highlight" } };
+    const nodes = [
+        { nodeValue: "abcdef", parentElement: null },
+        { nodeValue: "ghij", parentElement: mark },
+        { nodeValue: "kl", parentElement: null },
+    ];
+    const pieces = core.markPieces(nodes, 3, 9);
+    assert.deepEqual(pieces.map((piece) => [piece.at, piece.length, piece.mark === mark]),
+                     [[3, 3, false], [0, 4, true], [0, 2, false]]);
+    assert.equal(pieces[0].node, nodes[0]);
+    assert.equal(pieces[2].node, nodes[2]);
+    // The mark is the one the piece sits inside, found up the parent chain — the
+    // shape a painted highlight has: <mark><span>text</span></mark>.
+    const nested = { nodeValue: "ab", parentElement: { classList: { contains: () => false },
+                                                      parentElement: mark } };
+    assert.equal(core.markPieces([nested], 0, 2)[0].mark, mark);
+    // A run that covers nothing, or a document with no text nodes: no pieces.
+    assert.deepEqual(core.markPieces(nodes, 12, 1), []);
+    assert.deepEqual(core.markPieces([], 0, 3), []);
 });
 
 test("textOffset measures a range point in the run's own coordinates", () => {
