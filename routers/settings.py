@@ -52,7 +52,7 @@ def update_settings(settings: SettingsUpdate):
         if provider not in PROVIDERS:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid provider. Must be 'ollama' or 'ollama_cloud'")
+                detail="Invalid provider. Must be 'ollama' or 'cline'")
         runtime_settings["provider_override"] = provider
     return {"provider_override": runtime_settings["provider_override"],
             "status": "success"}

@@ -194,8 +194,15 @@ runtime_settings = {"provider_override": None}
 
 
 def default_provider() -> str:
-    """The provider `.env` asks for; `ollama_cloud` if it says nothing."""
-    return os.getenv("OLLAMA_DEFAULT_PROVIDER", "ollama_cloud")
+    """The provider `.env` asks for (OLLAMA_DEFAULT_PROVIDER).
+
+    Unset or not a known provider, it is the first one — the local, free one —
+    rather than a guess at a paid endpoint.
+    """
+    from ai_service import PROVIDERS
+
+    wanted = os.getenv("OLLAMA_DEFAULT_PROVIDER", "").strip().lower()
+    return wanted if wanted in PROVIDERS else PROVIDERS[0]
 
 
 def effective_provider() -> str:

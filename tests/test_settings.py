@@ -6,7 +6,7 @@ from __future__ import annotations
 def test_settings_report_the_default_provider(isolated_client):
     payload = isolated_client.get("/api/settings").json()
     assert payload["provider_override"] is None
-    assert payload["default_provider"] in ("ollama", "ollama_cloud")
+    assert payload["default_provider"] in ("ollama", "cline")
     assert payload["status"] == "success"
 
 

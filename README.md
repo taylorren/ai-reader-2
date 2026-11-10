@@ -57,7 +57,7 @@ Clipboard API. Which AI answers is a choice in the bar itself (本地 / 云端),
 not inside the panel: the panel is closed until a selection opens it, and that
 is a setting a reader wants to see first. `/highlights/{slug}`
 lists everything and exports it as Markdown; `/api/settings` switches between
-local and cloud Ollama (the bar's toggle is that setting). **Formulas display,
+local Ollama and remote Cline (the bar's toggle is that setting). **Formulas display,
 whatever the book ships**: its own MathML and its images render natively, and the
 shell converts a book's LaTeX to MathML itself with a vendored Temml (fetched
 only for a chapter that has formulas) — so a formula stays selectable text, and
@@ -67,10 +67,15 @@ survives a restart. **Docker packaging has
 landed** (P5, in part — see below, and the image it publishes); systemd
 packaging and the old world's removal come next.
 
-The AI panel talks to an OpenAI-compatible Ollama endpoint; copy `.env.example`
-to `.env` and set `OLLAMA_BASE_URL` / `OLLAMA_MODEL` (and `OLLAMA_CLOUD_MODEL`
-for the cloud provider). Without it the reader works; the AI panel reports a
-named error.
+The AI panel has two providers, both OpenAI-compatible, and **every setting for
+them lives in `.env`** (copy `.env.example`) — the code has no built-in endpoint,
+key or model, and a provider with a missing setting reports which variable is
+unset. `ollama` (本地) calls the Ollama at `OLLAMA_BASE_URL` with `OLLAMA_API_KEY`
+and `OLLAMA_MODEL`. `cline` (云端) calls the Cline API at `CLINE_BASE_URL` with
+`CLINE_KEY` and `CLINE_MODEL` (ids are `provider/model`), billed to your Cline
+account. `OLLAMA_DEFAULT_PROVIDER` picks which one the panel opens on and
+`AI_TIMEOUT` is the reply timeout in seconds. A rejected call is relayed with the
+provider's own sentence rather than the bare status phrase.
 
 ## Docker
 
@@ -121,8 +126,8 @@ image and be lost on a rebuild. Both mounts must be writable by uid 1000.
   the only thing that writes to it.
 
 AI configuration is environment, not a baked `.env` (`OLLAMA_BASE_URL`,
-`OLLAMA_API_KEY`, `OLLAMA_MODEL`, `OLLAMA_CLOUD_MODEL`,
-`OLLAMA_DEFAULT_PROVIDER`) — or mount one read-only:
+`OLLAMA_API_KEY`, `OLLAMA_MODEL`, `CLINE_BASE_URL`, `CLINE_KEY`, `CLINE_MODEL`,
+`OLLAMA_DEFAULT_PROVIDER`, `AI_TIMEOUT`) — or mount one read-only:
 `-v ./.env:/app/.env:ro`. Every one is optional; the reader works without AI.
 
 ## License

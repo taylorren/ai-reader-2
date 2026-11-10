@@ -994,7 +994,8 @@ def test_the_copy_action_copies_where_the_clipboard_api_is_absent(
         page.close()
 
 
-def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
+def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload,
+                                             monkeypatch):
     """The provider used to be changeable only inside the AI panel — which is
     not on screen until a selection opens it, so "which model answers" was
     invisible until the reader had already asked something.
@@ -1003,6 +1004,9 @@ def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
     setting, it is what the server is set to, and the next page load renders it
     checked — that last one is the server's own render, not a script's guess.
     """
+    # The default is the .env's (OLLAMA_DEFAULT_PROVIDER); pin it so the test
+    # does not depend on the developer's own file.
+    monkeypatch.setenv("OLLAMA_DEFAULT_PROVIDER", "cline")
     slug = upload()
 
     page = browser.new_page()
@@ -1013,8 +1017,8 @@ def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
         assert page.locator("#ai-panel").is_hidden(), "the panel starts closed"
 
         local = toggle.locator('.provider-option[data-provider="ollama"]')
-        cloud = toggle.locator('.provider-option[data-provider="ollama_cloud"]')
-        # The shell rendered the provider the server is set to: the cloud
+        cloud = toggle.locator('.provider-option[data-provider="cline"]')
+        # The shell rendered the provider the server is set to: the remote
         # default, with the local option there to be chosen.
         assert cloud.get_attribute("aria-checked") == "true"
         assert local.get_attribute("aria-checked") == "false"
@@ -1040,9 +1044,9 @@ def test_the_provider_is_chosen_from_the_bar(browser, base_url, upload):
         page.keyboard.press("ArrowRight")
         page.wait_for_function(
             "() => document.querySelector('#provider-toggle "
-            ".provider-option[data-provider=\"ollama_cloud\"]')"
+            ".provider-option[data-provider=\"cline\"]')"
             ".getAttribute('aria-checked') === 'true'")
-        assert stored_settings(base_url)["provider_override"] == "ollama_cloud"
+        assert stored_settings(base_url)["provider_override"] == "cline"
     finally:
         page.close()
 

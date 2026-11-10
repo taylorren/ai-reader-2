@@ -249,7 +249,7 @@ test("the bar's toggle is the setting", async () => {
 });
 
 test("a radiogroup is one tab stop, and the arrows move it", async () => {
-    const page = scriptedPage();
+    const page = scriptedPage({ provider: "cline" });
     page.route(/\/api\/settings$/, { provider_override: "ollama", status: "success" });
 
     // Only the checked option is in the tab order: the group is one stop.

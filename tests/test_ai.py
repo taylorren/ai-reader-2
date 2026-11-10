@@ -64,11 +64,11 @@ def test_the_provider_override_wins(isolated_client, monkeypatch):
         return provider
 
     monkeypatch.setattr(service(), "fact_check", fake_fact_check)
-    app_state.runtime_settings["provider_override"] = "ollama_cloud"
+    app_state.runtime_settings["provider_override"] = "cline"
     response = isolated_client.post("/api/ai/analyze", json={
         "analysis_type": "fact_check", "selected_text": "x",
         "provider": "ollama"})
-    assert response.json()["provider_used"] == "ollama_cloud"
+    assert response.json()["provider_used"] == "cline"
 
 
 def test_start_discussion_seeds_the_history(isolated_client, monkeypatch):
@@ -242,6 +242,66 @@ def test_the_ai_client_is_shared_within_a_loop_and_closed_on_shutdown():
     assert asyncio.run(next_loop()) is False, "a new loop gets a live client"
 
 
+def test_each_provider_reads_its_own_endpoint_key_and_model_from_the_env(
+        monkeypatch):
+    """`ollama` is the local server; `cline` is the Cline API. Nothing is baked
+    into the code, and the Ollama key is never sent to Cline."""
+    from ai_service import AIService
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://daemon.test:11434/v1/")
+    monkeypatch.setenv("OLLAMA_API_KEY", "ollama-key")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-model")
+    monkeypatch.setenv("CLINE_BASE_URL", "https://cline.test/api/v1")
+    monkeypatch.setenv("CLINE_KEY", "cline-key")
+    monkeypatch.setenv("CLINE_MODEL", "vendor/cline-model")
+
+    service = AIService()
+    assert service.connection("ollama") == (        # trailing slash trimmed
+        "http://daemon.test:11434/v1", "ollama-key", "local-model")
+    assert service.connection("cline") == (
+        "https://cline.test/api/v1", "cline-key", "vendor/cline-model")
+
+
+def test_a_missing_setting_is_named_not_defaulted(monkeypatch):
+    """No endpoint, key or model is built in: an unset one is an error that says
+    which variable to set."""
+    from ai_service import AIService, AIServiceError
+
+    for name in ("OLLAMA_BASE_URL", "OLLAMA_API_KEY", "OLLAMA_MODEL",
+                 "CLINE_BASE_URL", "CLINE_KEY", "CLINE_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    expected = {"ollama": "OLLAMA_BASE_URL, OLLAMA_API_KEY, OLLAMA_MODEL",
+                "cline": "CLINE_BASE_URL, CLINE_KEY, CLINE_MODEL"}
+    for provider, names in expected.items():
+        try:
+            AIService().connection(provider)
+        except AIServiceError as exc:
+            assert names in str(exc)
+        else:
+            raise AssertionError(f"{provider} with no settings must raise")
+
+
+def test_the_default_provider_comes_from_the_env(isolated_client, monkeypatch):
+    from routers.app_state import default_provider
+
+    monkeypatch.setenv("OLLAMA_DEFAULT_PROVIDER", "cline")
+    assert default_provider() == "cline"
+    monkeypatch.setenv("OLLAMA_DEFAULT_PROVIDER", "nonsense")
+    assert default_provider() == "ollama"      # unknown: the local, free one
+    monkeypatch.delenv("OLLAMA_DEFAULT_PROVIDER")
+    assert default_provider() == "ollama"
+
+    async def fake_fact_check(text, context_before="", context_after="",
+                              provider="?"):
+        return provider
+
+    monkeypatch.setattr(service(), "fact_check", fake_fact_check)
+    monkeypatch.setenv("OLLAMA_DEFAULT_PROVIDER", "cline")
+    response = isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "fact_check", "selected_text": "x"})   # no provider
+    assert response.json()["provider_used"] == "cline"
+
+
 def test_an_unknown_provider_raises_the_service_error():
     """`connection()` raises before the request; `_call` must hand that out as an
     AIServiceError rather than wrapping or losing it (the handler that did so was
@@ -256,6 +316,82 @@ def test_an_unknown_provider_raises_the_service_error():
         assert "openai" in str(exc)
     else:
         raise AssertionError("an unknown provider must raise AIServiceError")
+
+
+def test_a_rejected_call_relays_the_providers_reason():
+    """A 402 used to reach the panel as the bare phrase `Payment Required`.
+
+    `raise_for_status()` keeps the status and throws the body away, and the
+    body is where Ollama says why — "Add usage credits or subscribe …" for an
+    account out of credits. The reader can only act on the sentence the
+    provider wrote, so the 502 detail has to carry it.
+    """
+    import asyncio
+
+    import httpx
+
+    from ai_service import AIService, AIServiceError
+
+    def rejecting(request):
+        return httpx.Response(402, json={"error": {"message":
+            "Add usage credits or subscribe: https://ollama.com/plans"}})
+
+    async def call():
+        service = AIService()
+        service.cline_base_url = "https://cline.test/api/v1"
+        service.cline_key = "test-key"
+        service.cline_model = "vendor/model"
+        service._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(rejecting))
+        service._client_loop = asyncio.get_running_loop()
+        try:
+            await service._call("some text", provider="cline")
+        finally:
+            await service.aclose()
+
+    try:
+        asyncio.run(call())
+    except AIServiceError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("a rejected call must raise AIServiceError")
+    assert "402" in message
+    assert "Add usage credits or subscribe" in message
+
+
+def _status_error(status, body):
+    """An httpx.HTTPStatusError, the way `raise_for_status()` makes one."""
+    import httpx
+
+    request = httpx.Request("POST", "http://example.test/v1/chat/completions")
+    response = httpx.Response(status, request=request, json=body)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return exc
+    raise AssertionError("a non-2xx response must raise")
+
+
+def test_the_provider_error_reader_reads_both_ollama_shapes():
+    """Ollama's OpenAI-compatible endpoint nests the reason under `error`; the
+    native one puts it there as a string. A body with nothing usable — HTML
+    from a proxy, an empty object — leaves the status line standing."""
+    from ai_service import ERROR_DETAIL_LIMIT, _provider_error
+
+    assert _provider_error(_status_error(402, {"error": {"message": "Add usage "
+                                                              "credits"}})) == (
+        "402 Payment Required: Add usage credits")
+    assert _provider_error(_status_error(404, {"error": "model not found"})) == (
+        "404 Not Found: model not found")
+
+    # A long body is bounded, and the cut is marked.
+    long = _provider_error(_status_error(500, {"error": {"message": "x" * 1000}}))
+    assert long.startswith("500 Internal Server Error: ")
+    assert long.endswith("…")
+    assert len(long) == len("500 Internal Server Error: ") + ERROR_DETAIL_LIMIT + 1
+
+    assert _provider_error(_status_error(502, {})) == "502 Bad Gateway"
+    assert _provider_error(_status_error(502, None)) == "502 Bad Gateway"
 
 
 def test_editing_a_note_keeps_its_paragraphs(isolated_client, isolated,
@@ -449,3 +585,31 @@ def test_the_excerpt_labels_the_selection_between_its_halves():
     # Nothing to show: the caller sends the bare selection.
     assert _excerpt("SEL") == ""
 
+
+
+def test_both_response_shapes_are_read():
+    """Ollama answers the bare OpenAI body; the Cline API wraps it in
+    `{"data": {...}, "success": true}`. Both must yield the message text."""
+    import asyncio
+
+    import httpx
+
+    from ai_service import AIService
+
+    body = {"choices": [{"message": {"content": "the answer"}}]}
+
+    async def call(payload, provider):
+        service = AIService()
+        service.cline_base_url = "https://cline.test/api/v1"
+        service.cline_key = "test-key"
+        service.cline_model = "vendor/model"
+        service._client = httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=payload)))
+        service._client_loop = asyncio.get_running_loop()
+        try:
+            return await service._call("q", provider=provider)
+        finally:
+            await service.aclose()
+
+    assert asyncio.run(call(body, "ollama")) == "the answer"
+    assert asyncio.run(call({"data": body, "success": True}, "cline")) == "the answer"

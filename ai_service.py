@@ -1,9 +1,10 @@
-"""The Ollama client: local and cloud, one OpenAI-compatible surface.
+"""The AI client: local Ollama and remote Cline, one OpenAI-compatible surface.
 
 Reimplemented from ai-reader's service (its behaviour is the requirement),
-not copied. Two providers share one endpoint shape; only the model and the
-key differ. Failures raise `AIServiceError` — a route maps that to 502, so
-an AI failure is never a 200 carrying error text.
+not copied. Two providers share one endpoint shape: `ollama` is a local daemon,
+`cline` is the Cline API (api.cline.bot), billed to CLINE_KEY. The endpoint,
+key and model differ per provider. Failures raise `AIServiceError` —
+a route maps that to 502, so an AI failure is never a 200 carrying error text.
 
 Every call is async httpx: the FastAPI routes that await it are async too.
 Prompts ask for Simplified Chinese, matching the reference's output contract.
@@ -21,7 +22,7 @@ class AIServiceError(Exception):
     """An AI call failed — network, HTTP status, or unreadable response."""
 
 
-PROVIDERS = ("ollama", "ollama_cloud")
+PROVIDERS = ("ollama", "cline")
 
 # How much of the selection's surroundings travels with it. The panel captures
 # the same span (CONTEXT_SPAN in panel.js), so the two bounds agree.
@@ -63,16 +64,62 @@ def _system_prompt(provider: str) -> str:
     return "请使用简体中文回答，保持表达清晰、准确。"
 
 
+# How much of a rejected call's own words travel on. A provider puts the reason
+# in the body — Ollama Cloud answers an account with no credits with
+# `402 {"error": {"message": "Add usage credits or subscribe …"}}` — and that
+# is the only sentence a reader can act on. The whole body is not relayed: it
+# is the provider's payload, and the panel has room for a line.
+ERROR_DETAIL_LIMIT = 300
+
+
+def _provider_error(exc: httpx.HTTPStatusError) -> str:
+    """The status line plus whatever the provider said about it.
+
+    `raise_for_status()` keeps the status and drops the body, so an exhausted
+    Ollama Cloud account reached the panel as the bare phrase "402 Payment
+    Required" — with the reason ("Add usage credits or subscribe …") lost, and
+    nothing to do about it. Both Ollama shapes are read: `{"error":
+    {"message": …}}` on its OpenAI-compatible endpoint, `{"error": …}` on its
+    native one. A body that says nothing usable leaves the status line alone.
+    """
+    response = exc.response
+    status = f"{response.status_code} {response.reason_phrase}".strip()
+    try:
+        data = response.json()
+    except ValueError:
+        return status
+    if not isinstance(data, dict):
+        return status
+    message = data.get("error")
+    if isinstance(message, dict):
+        message = message.get("message")
+    if not isinstance(message, str) or not message.strip():
+        message = data.get("detail") or data.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return status
+    message = " ".join(message.split())
+    if len(message) > ERROR_DETAIL_LIMIT:
+        message = message[:ERROR_DETAIL_LIMIT].rstrip() + "…"
+    return f"{status}: {message}"
+
+
 class AIService:
     """Fact-check, discussion and summarising against an Ollama endpoint."""
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        self.base_url = base_url or os.getenv(
-            "OLLAMA_BASE_URL", "http://localhost:11434/v1")
-        self.api_key = api_key or os.getenv("OLLAMA_API_KEY", "ollama")
-        self.model = os.getenv("OLLAMA_MODEL", "llama3")
-        self.cloud_model = os.getenv("OLLAMA_CLOUD_MODEL", "gpt-oss:120b-cloud")
-        self.timeout = float(os.getenv("OLLAMA_TIMEOUT", "60"))
+        # Every endpoint, key and model comes from the environment (.env) — no
+        # value is baked in here. A missing one is reported by `connection()`,
+        # naming the variable, when that provider is first used.
+        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "")
+        self.api_key = api_key or os.getenv("OLLAMA_API_KEY", "")
+        self.model = os.getenv("OLLAMA_MODEL", "")
+        # The remote provider is the Cline API: OpenAI-compatible, one key for
+        # every upstream model, whose ids are `provider/model`.
+        self.cline_base_url = os.getenv("CLINE_BASE_URL", "")
+        self.cline_key = os.getenv("CLINE_KEY", "")
+        self.cline_model = os.getenv("CLINE_MODEL", "")
+        # Seconds; a shared pool-wide ceiling, not a per-provider setting.
+        self.timeout = float(os.getenv("AI_TIMEOUT") or 60)
         self._client: httpx.AsyncClient | None = None
         self._client_loop = None
 
@@ -106,8 +153,22 @@ class AIService:
         provider = (provider or "ollama").lower()
         if provider not in PROVIDERS:
             raise AIServiceError(f"不支持的AI提供商: {provider}")
-        model = self.cloud_model if provider == "ollama_cloud" else self.model
-        return self.base_url, self.api_key, model
+        if provider == "cline":
+            settings = (
+                ("CLINE_BASE_URL", self.cline_base_url),
+                ("CLINE_KEY", self.cline_key),
+                ("CLINE_MODEL", self.cline_model))
+        else:
+            settings = (
+                ("OLLAMA_BASE_URL", self.base_url),
+                ("OLLAMA_API_KEY", self.api_key),
+                ("OLLAMA_MODEL", self.model))
+        missing = [name for name, value in settings if not value]
+        if missing:
+            raise AIServiceError(
+                f"未配置 {', '.join(missing)}（请在 .env 中设置）")
+        (_, base_url), (_, key), (_, model) = settings
+        return base_url.rstrip("/"), key, model
 
     def _messages(self, prompt: str, provider: str,
                   history: list[dict] | None = None) -> list[dict]:
@@ -142,7 +203,15 @@ class AIService:
             )
             response.raise_for_status()
             data = response.json()
+            # The Cline API wraps the OpenAI body: {"data": {"choices": …},
+            # "success": true}. Ollama answers the bare body.
+            if isinstance(data, dict) and "choices" not in data:
+                data = data.get("data", data)
             return data["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as exc:
+            # The status *and* the provider's own reason: a bare "402 Payment
+            # Required" tells the reader nothing they can act on.
+            raise AIServiceError(f"AI API调用失败: {_provider_error(exc)}") from exc
         except httpx.HTTPError as exc:
             raise AIServiceError(f"AI API调用失败: {exc}") from exc
         except AIServiceError:
@@ -162,22 +231,23 @@ class AIService:
         text around it rather than guessed (REVIEW P1-3).
         """
         body = _excerpt(text, context_before, context_after) or text
-        prompt = f"""请帮我理解以下内容：
+        prompt = f"""请核查并解释以下内容（读者正在阅读，只想快速弄清它是什么、对不对）：
 
 {body}
 
-请根据内容类型提供相应的解释：
+按类型作答，只答最关键的几点：
+- 概念/术语：一句话定义，再补一句它在此处的含义
+- 人物：身份 + 最重要的一两件事（生卒年可略）
+- 事件：时间、经过、影响，各一句
+- 地点：位置 + 与此处相关的要点
+- 事实/数据陈述：第一句直接下结论——「属实」「不实」「部分属实」「存疑」之一——然后用一两句给出依据或更正
 
-**如果是专有名词/概念**：给出清晰的定义和解释
-**如果是人物**：介绍其身份、背景和重要性
-**如果是历史事件**：说明事件经过、时间、影响
-**如果是地点**：介绍其地理位置、特点、相关背景
-**如果是数据/事实陈述**：验证准确性，提供来源或背景
-
-要求：
-- 简洁明了，重点突出
-- 如有错误或争议，明确指出
-- 如果内容不完整或无法判断，说明需要更多上下文"""
+硬性要求：
+- 总字数不超过 150 字，最多 4 个要点，每点一行，不分小标题
+- 不要开场白、不要复述原文、不要结尾总结或客套话
+- 先给结论，再给依据；有错误或争议，直接点明
+- 不确定就写「存疑」并说明原因，不要编造来源、年份或数字
+- 无法判断时，只用一句话说明还需要什么上下文"""
         return await self._call(prompt, provider=provider)
 
     async def discuss(self, text: str, context_before: str = "",

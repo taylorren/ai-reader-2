@@ -48,7 +48,7 @@ window.ReaderPanel = (function () {
         conversation: [],
         summary: null,       // the discussion summary waiting to be saved
         analysisType: null,  // what the open analysis is (fact_check | discussion)
-        provider: "ollama_cloud",
+        provider: null,        // set from the server-rendered toggle (renderedProvider)
         busy: false,
         saved: false,
         editing: null,       // the saved analysis the panel is editing
@@ -135,7 +135,7 @@ window.ReaderPanel = (function () {
     function renderedProvider() {
         const checked = document.querySelector(
             "#provider-toggle .provider-option[aria-checked='true']");
-        return (checked && checked.dataset.provider) || "ollama_cloud";
+        return (checked && checked.dataset.provider) || null;   // null: the server picks
     }
 
     async function loadSettings() {

@@ -131,7 +131,7 @@ function createPage(options = {}) {
     // only provider control — the panel's select was removed.
     // `createPage({provider})` is the *server-rendered* choice: which option
     // arrives checked, before any script has run.
-    const providerOptions = ["ollama", "ollama_cloud"].map((provider) => {
+    const providerOptions = ["ollama", "cline"].map((provider) => {
         const option = makeElement("button", registry);
         option.dataset.provider = provider;
         option.className = "provider-option";

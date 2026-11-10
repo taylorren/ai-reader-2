@@ -33,13 +33,17 @@ services:
       READER_HOST: "0.0.0.0"
       READER_PORT: "8123"
       READER_DB: "/data/reader_data.db"
-      # Point at your Ollama host from inside the container.
-      # "host.docker.internal" works with `extra_hosts` below.
-      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}"
-      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-ollama}"
-      OLLAMA_MODEL: "${OLLAMA_MODEL:-llama3}"
-      OLLAMA_CLOUD_MODEL: "${OLLAMA_CLOUD_MODEL:-gpt-oss:120b-cloud}"
-      # Provider the panel opens on: ollama or ollama_cloud.
-      OLLAMA_DEFAULT_PROVIDER: "${OLLAMA_DEFAULT_PROVIDER:-ollama_cloud}"
+      # AI settings come from the .env next to this file (compose reads it for
+      # ${...}); there are no defaults here or in the code. From inside the
+      # container, reach an Ollama on the Docker host with
+      # "host.docker.internal" (see `extra_hosts` below).
+      OLLAMA_DEFAULT_PROVIDER: "${OLLAMA_DEFAULT_PROVIDER:-}"
+      AI_TIMEOUT: "${AI_TIMEOUT:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+      OLLAMA_API_KEY: "${OLLAMA_API_KEY:-}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
+      CLINE_BASE_URL: "${CLINE_BASE_URL:-}"
+      CLINE_KEY: "${CLINE_KEY:-}"
+      CLINE_MODEL: "${CLINE_MODEL:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"

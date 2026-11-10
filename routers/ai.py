@@ -23,7 +23,8 @@ from pydantic import BaseModel
 
 from ai_service import PROVIDERS, AIServiceError
 
-from .app_state import get_ai_service, get_db, runtime_settings
+from .app_state import (default_provider, get_ai_service, get_db,
+                        runtime_settings)
 from .highlights import store_highlight
 
 router = APIRouter()
@@ -53,7 +54,7 @@ class AnalyzeRequest(BaseModel):
     selected_text: str
     context_before: str = ""
     context_after: str = ""
-    provider: str = "ollama_cloud"
+    provider: str | None = None
 
 
 class SaveAnalysisRequest(BaseModel):
@@ -89,7 +90,7 @@ class DiscussionStartRequest(BaseModel):
     selected_text: str
     context_before: str = ""
     context_after: str = ""
-    provider: str = "ollama_cloud"
+    provider: str | None = None
 
 
 class DiscussionContinueRequest(BaseModel):
@@ -98,14 +99,14 @@ class DiscussionContinueRequest(BaseModel):
     the field was accepted and never read (REVIEW P3-15)."""
     conversation_history: list[ConversationMessage]
     user_message: str
-    provider: str = "ollama_cloud"
+    provider: str | None = None
 
 
 class DiscussionSummarizeRequest(BaseModel):
     """The whole discussion, as one analysis. The transcript is the input: the
     selection is its first message, so no separate field is needed."""
     conversation_history: list[ConversationMessage]
-    provider: str = "ollama_cloud"
+    provider: str | None = None
 
 
 def _provider(requested: str | None) -> str:
@@ -114,7 +115,7 @@ def _provider(requested: str | None) -> str:
     An unknown provider is a 400 here, before any call is attempted.
     """
     provider = (runtime_settings["provider_override"] or requested
-                or "ollama_cloud").lower()
+                or default_provider()).lower()
     if provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail="Invalid AI provider")
     return provider
