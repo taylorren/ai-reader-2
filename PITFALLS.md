@@ -367,6 +367,65 @@ indistinguishable from the book never saving again.
 
 ---
 
+## 7. 解释说明 answered the passage, not the selection
+
+**Provenance: reported by the reader, twice, on real books.** Select 乔布斯 in
+a paragraph that also names Cupertino and Apple: the answer spent itself on the
+neighbours and on whether the name was right, never on Jobs. Select 塔吉克 in
+a passage about tribal arbitration: the reply — hermes3, the local 8B — gave
+no Tajik / Тоҷик, described a 塔吉克地区 said to sit 在该国的西北部 and to be
+苦盞地区的首府 (a region that is a capital; neither point real), and folded the
+passage's own arbitration sentence in as though it described the entity.
+
+Two reports, one prompt, five holes in it:
+
+- It opened with 请核查并解释, and 先给结论 applied to every type. For a
+  selected name an obedient model starts with the verdict shape — 「确有其人」 —
+  when the reader had asked for an introduction.
+- Nothing said the selection was the answer's only subject. The context (300
+  characters a side, carried so a bare pronoun can be resolved) was, to the
+  model, simply more text to explain.
+- The 原文 requirement was conditional, at the end of the 人物 and 地点 lines.
+  A 塔吉克 filed as a 民族 or a language fires neither — and the classification
+  is the model's, not the prompt's.
+- 必须仅使用简体中文回答 — the ollama system prompt — is, to a small model, a
+  rule about foreign letters: none. The blunter rule wins, and
+  乔布斯（Steve Jobs）became 乔布斯.
+- The link instruction had no honest out. Both renderers make a well-formed
+  wrong URL clickable — the sanitizers judge safety, not truth — and neither
+  provider can look an address up, so 「给出链接」 pressed is a link invented.
+
+**Fix:** `fact_check` in `ai_service.py` states scope first —
+选中的文本是唯一的回答对象、上下文仅用于消歧 — answers by type (an
+introduction for a name; a verdict only when the selection itself states a
+claim, 「属实」…「存疑」), asks for 原文 once and unconditionally as a hard rule,
+with a format and an honest out (「原文不详」, never invented), asks for links
+as real Markdown \[名称](网址) with the same escape (改为给出可检索的条目名称), 
+and lives under a 200-character cap (was 150) that carries 生卒年 for a
+person. The ollama system prompt exempts a parenthetical original
+(乔布斯（Steve Jobs）style), and the model itself stays one click away in the
+top bar — 本地 / 云端.
+
+**What pins it:** `tests/test_ai.py` — the scope rules over person / place /
+claim selections (乔布斯 beside Cupertino's Apple, Cupertino beside Jobs, and
+a selected claim), per provider; the 原文 rule and its 「原文不详」 out; the
+links instruction. And `tests/test_highlights.py` pins the far half of the
+links promise: a Markdown link renders as an anchor, and `javascript:` never.
+
+**Lesson:** a prompt rule reaches exactly as far as the model's own grasp of
+the entity. Measured, not guessed: driving the app's own `fact_check` against
+the live providers, the same 8B model followed every rule for 乔布斯 — an
+entity it knows cold — and lost all of them for 塔吉克, echoing 【选中的文本】
+into its reply and printing it twice. The same prompt, on qwen3.8 (27B), was
+followed to the letter for both: 原文 first, the passage folded into one
+interpretation line, a well-formed zh.wikipedia link. What a prompt *can* do
+is what the fix did — make each rule unconditional, give every "must" an
+honest out, never ask a model to weigh a hedge word (「必要时」) it would rather
+satisfy. The rest belongs to the model, and the reader carries that setting
+in the top bar.
+
+---
+
 ## Why the suite was green for all of them
 
 None of these is a hole in coverage — every path is tested. Each was tested under

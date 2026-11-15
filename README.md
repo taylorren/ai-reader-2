@@ -51,7 +51,11 @@ navigation. Footnotes open from the library's edges
 without fetching a rendered page. Highlights, AI analysis and reading progress
 now live on that DOM: select text to explain it (解释说明), discuss it
 (深入讨论) or write a note (个人笔记); each becomes a highlight anchored to the
-library's block id, and its AI response is stored as Markdown. The same menu
+library's block id, and its AI response is stored as Markdown. 解释说明
+answers the selection itself: context settles which 乔布斯 or 塔吉克 the
+passage means, the answer introduces that person or place — its 原文 beside
+the Chinese name — and only a claim the selection itself makes is checked,
+inside 200 characters. The same menu
 copies the selection (复制文本) — on plain http too, where a browser has no
 Clipboard API. Which AI answers is a choice in the bar itself (本地 / 云端),
 not inside the panel: the panel is closed until a selection opens it, and that
