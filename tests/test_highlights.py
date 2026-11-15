@@ -86,13 +86,21 @@ def test_the_highlights_view_renders_and_sanitises(isolated_client, isolated, up
     isolated_client.post("/api/ai/save", json={
         "highlight_id": highlight_id, "analysis_type": "fact_check",
         "prompt": "p",
-        "response": "<script>alert(1)</script>**bold** finding"})
+        "response": "<script>alert(1)</script>**bold** finding "
+                    "[Jobs](https://en.wikipedia.org/wiki/Steve_Jobs) "
+                    "[bad](javascript:alert(1))"})
 
     page = isolated_client.get(f"/highlights/{slug}")
     assert page.status_code == 200
     body = page.text
     assert "The first paragraph mentions a plate" in body
     assert "<strong>bold</strong>" in body          # markdown rendered
+    # A real link renders as an anchor: fact_check now asks the model for
+    # one, and this pins the allowlist that keeps that instruction real —
+    # bleach dropping "a" would leave the prompt promising a dead format.
+    assert ('<a href="https://en.wikipedia.org/wiki/Steve_Jobs">Jobs</a>'
+            in body)
+    assert '<a href="javascript:' not in body       # unsafe schemes never do
     assert "<script>alert(1)</script>" not in body  # but sanitised
     assert "解释说明" in body
 

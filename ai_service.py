@@ -55,11 +55,18 @@ def _excerpt(selected: str, before: str = "", after: str = "",
 
 
 def _system_prompt(provider: str) -> str:
-    """The Chinese-output contract the reference app enforces per provider."""
+    """The Chinese-output contract the reference app enforces per provider.
+
+    The ollama half forbids English — which a small local model also reads
+    as "no foreign words at all", and then it drops the 原文 that fact_check
+    asks to be printed next to a translated name. The parenthetical
+    exemption keeps the contract for prose while letting originals in.
+    """
     if provider == "ollama":
         return (
             "你是中文阅读助手。必须仅使用简体中文回答。"
             "不要输出英文句子，不要输出英文小标题；如需术语请给出中文解释。"
+            "括号中标注译名原文不受此限，如：乔布斯（Steve Jobs）。"
         )
     return "请使用简体中文回答，保持表达清晰、准确。"
 
@@ -231,23 +238,32 @@ class AIService:
         text around it rather than guessed (REVIEW P1-3).
         """
         body = _excerpt(text, context_before, context_after) or text
-        prompt = f"""请核查并解释以下内容（读者正在阅读，只想快速弄清它是什么、对不对）：
+        prompt = f"""请只解释读者选中的文本，帮助读者快速理解它；只有选中文本本身提出事实/数据陈述时，才核查该陈述：
 
 {body}
 
-按类型作答，只答最关键的几点：
+范围要求：
+- 选中的文本是唯一的回答对象；有上下文时，以【选中的文本】标记为准
+- 上下文仅用于消歧、确认指代和理解选中文本在此处的含义，不是待解释或待核查的对象
+- 不要转而介绍或核查仅出现在上下文中的其他人物、地点、机构或概念；必要时可简短提及它们与选中对象的关系，但不要展开
+- 按选中文本本身的类型作答，不要因为上下文包含事实陈述，就把选中的人名、地名或术语当作一项主张来核查
+
+按选中文本的类型作答，只答最关键的几点：
 - 概念/术语：一句话定义，再补一句它在此处的含义
-- 人物：身份 + 最重要的一两件事（生卒年可略）
+- 人物：直接介绍此人的身份、主要经历或贡献，以及为何重要（生卒年不可略），如果是外国人的中文译名，应该给出原文名
 - 事件：时间、经过、影响，各一句
-- 地点：位置 + 与此处相关的要点
+- 地点：直接介绍其位置、性质、主要特色或历史意义。如果是外国地名，应该给出原文名。
+- 人名、地名、机构名或术语本身不是事实主张：不要回答「属实」「名字正确」「确有其人」之类的核查结论，而要提供介绍或解释
 - 事实/数据陈述：第一句直接下结论——「属实」「不实」「部分属实」「存疑」之一——然后用一两句给出依据或更正
+- 必要时，以 [名称](网址) 的 Markdown 形式给出权威链接（如维基百科条目）；不确定确切网址时不要编造链接，改为给出可检索的条目名称
 
 硬性要求：
-- 总字数不超过 150 字，最多 4 个要点，每点一行，不分小标题
+- 选中文本若是外来译名（人名、地名、国名、族名、语言、机构或术语都算），回答开头第一次提到它时就要给出原文，格式如「乔布斯（Steve Jobs）」或「热那亚（Genova）」；原文用原语言或通行英文写法；不确定原文就写「原文不详」，不要编造原文写法
+- 总字数不超过 200 字，最多 4 个要点，每点一行，不分小标题
 - 不要开场白、不要复述原文、不要结尾总结或客套话
-- 先给结论，再给依据；有错误或争议，直接点明
-- 不确定就写「存疑」并说明原因，不要编造来源、年份或数字
-- 无法判断时，只用一句话说明还需要什么上下文"""
+- 介绍对象时先给身份或定义，再补充重要信息；核查陈述时先给结论，再给依据
+- 核查陈述不确定时写「存疑」并说明原因；不要编造来源、年份或数字
+- 无法确定选中文本指的是谁或什么时，只用一句话说明还需要什么上下文，不要猜测或改答上下文中的其他对象"""
         return await self._call(prompt, provider=provider)
 
     async def discuss(self, text: str, context_before: str = "",

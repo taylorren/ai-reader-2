@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def make_highlight(client, slug):
     response = client.post("/api/highlight", json={
@@ -531,6 +533,77 @@ def test_the_context_reaches_the_fact_check_prompt(isolated_client, monkeypatch)
     assert prompt.index(BEFORE) < prompt.index(SELECTION) < prompt.index(AFTER)
 
 
+@pytest.mark.parametrize("provider", ["ollama", "cline"])
+@pytest.mark.parametrize("selection,before,after", [
+    ("乔布斯", "在 Cupertino 的 Apple 总部，", "介绍了新产品。"),
+    ("Cupertino", "乔布斯回到 Apple 位于", "的总部。"),
+    ("乔布斯是 Apple 的联合创始人", "谈到 Cupertino 的科技企业时，", "。"),
+])
+def test_fact_check_keeps_the_selection_as_its_only_subject(
+        isolated_client, monkeypatch, provider, selection, before, after):
+    """Context identifies the subject; only a selected claim gets a verdict.
+
+    This checks the instructions sent to either provider, not model compliance.
+    """
+    prompts = captured_prompts(monkeypatch)
+    response = isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "fact_check", "selected_text": selection,
+        "context_before": before, "context_after": after, "provider": provider})
+    assert response.status_code == 200
+    prompt = prompts[-1]
+    assert f"【选中的文本】{selection}" in prompt
+    assert before in prompt and after in prompt
+    assert "选中的文本是唯一的回答对象" in prompt
+    assert "上下文仅用于消歧、确认指代" in prompt
+    assert "不要转而介绍或核查仅出现在上下文中的其他人物、地点、机构或概念" in prompt
+    assert "人名、地名、机构名或术语本身不是事实主张" in prompt
+    assert "而要提供介绍或解释" in prompt
+    assert "只有选中文本本身提出事实/数据陈述时，才核查该陈述" in prompt
+    assert "核查陈述时先给结论，再给依据" in prompt
+
+
+def test_fact_check_asks_for_links_it_can_stand_behind(isolated_client,
+                                                       monkeypatch):
+    """A URL is the one claim no renderer can check.
+
+    Both views make a well-formed wrong URL clickable — the sanitizers
+    judge safety, not truth — and neither provider can look an address
+    up, so the model needs an honest out. It is asked for authoritative
+    links in explicit Markdown (the highlights view does not linkify a
+    bare URL), and, when unsure of the exact address, for a searchable
+    name instead of a link it would invent to comply.
+    """
+    prompts = captured_prompts(monkeypatch)
+    isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "fact_check", "selected_text": SELECTION,
+        "provider": "ollama"})
+    prompt = prompts[-1]
+    assert "以 [名称](网址) 的 Markdown 形式给出权威链接（如维基百科条目）" in prompt
+    assert "不确定确切网址时不要编造链接" in prompt
+    assert "改为给出可检索的条目名称" in prompt
+
+
+def test_fact_check_asks_for_the_original_of_a_translated_name(
+        isolated_client, monkeypatch):
+    """The 原文 rule must not depend on how the model classifies the subject.
+
+    塔吉克 can be a country, an ethnic group or a language, and a clause
+    at the end of one type's line only fires when the model files the
+    selection under that type. So the requirement is stated once, for
+    every kind of translated name, as a hard rule — with a format and an
+    example, and with「原文不详」as the out, because a model pressed for
+    an original it does not know will otherwise invent one.
+    """
+    prompts = captured_prompts(monkeypatch)
+    isolated_client.post("/api/ai/analyze", json={
+        "analysis_type": "fact_check", "selected_text": SELECTION,
+        "provider": "ollama"})
+    prompt = prompts[-1]
+    assert "选中文本若是外来译名" in prompt
+    assert "格式如「乔布斯（Steve Jobs）」" in prompt
+    assert "「原文不详」" in prompt
+
+
 def test_the_context_reaches_the_discussion_prompt(isolated_client, monkeypatch):
     """深入讨论 was the worst case: the panel did not put the context on the
     wire at all, and discussion_overview had no parameter to receive it."""
@@ -555,8 +628,7 @@ def test_the_context_reaches_the_discussion_analysis_prompt(
 
 def test_without_context_the_prompt_is_the_bare_selection(
         isolated_client, monkeypatch):
-    """Nothing to show: the prompt stays what it was, rather than gaining an
-    empty, labelled block."""
+    """Without context, the body has no empty, labelled context block."""
     prompts = captured_prompts(monkeypatch)
     isolated_client.post("/api/ai/analyze", json={
         "analysis_type": "fact_check", "selected_text": SELECTION,
@@ -564,7 +636,7 @@ def test_without_context_the_prompt_is_the_bare_selection(
     prompt = prompts[-1]
     assert SELECTION in prompt
     assert "（上下文，仅供参考）" not in prompt
-    assert "【选中的文本】" not in prompt
+    assert "\n【选中的文本】" not in prompt
 
 
 def test_the_excerpt_labels_the_selection_between_its_halves():
