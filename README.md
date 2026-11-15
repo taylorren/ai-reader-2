@@ -47,7 +47,12 @@ chapters in a sandboxed iframe (render model A — nothing rewritten, nothing
 from the book executes), with the book's own typography, a TOC drawer whose
 entries jump to the section they name — in a book whose headings carry no `id`
 too, where the label is what locates the heading — prev/next and keyboard
-navigation. Footnotes open from the library's edges
+navigation. A spine page the book's own contents never names is listed too
+when it is a plate page — one that opens with its picture, its caption
+following — at its spine position and named by that caption: 自由的窄廊's
+text points at a 相片集 its nav and its NCX leave out entirely (PITFALLS 8),
+and the drawer finds the plates between 引用書目 and 版權頁. Footnotes open
+from the library's edges
 without fetching a rendered page. Highlights, AI analysis and reading progress
 now live on that DOM: select text to explain it (解释说明), discuss it
 (深入讨论) or write a note (个人笔记); each becomes a highlight anchored to the

@@ -392,6 +392,164 @@ def write_volume_epub(path) -> Path:
 
 
 
+# A book whose contents names its chapters but none of its plates: the spine
+# runs chapter → plates → a second, long-captioned plate → a blank divider →
+# an image-only title page → a page whose caption is a style block → a split
+# conversion's fragment → chapter, while the nav names the two chapters alone.
+# This is the shape that hid 自由的窄廊's 相片集: the photograph pages really do
+# carry prose — the book's own title first, then the caption and the credit
+# under the picture — and the caption, not that title prose, is the line that
+# tells one plate from another. Only the two plates may enter the drawer: a
+# plate page opens with its picture. The divider has no picture, the title
+# page's picture is its last word, the style block is markup rather than a
+# caption, and the fragment opens with its words and buries its illustration
+# mid-page — the four shapes a looser rule admitted, recorded in PITFALLS 8.
+# The second plate's caption runs past label length and must be cut.
+PHOTOINSERT_OPF = """<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Photo Insert Book</dc:title>
+    <dc:language>zh-TW</dc:language>
+    <dc:identifier id="bookid">urn:uuid:photoinsert-0001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="plate" href="img/plate%20one.png" media-type="image/png"/>
+    <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="plates" href="plates.xhtml" media-type="application/xhtml+xml"/>
+    <item id="plates2" href="plates2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="divider" href="divider.xhtml" media-type="application/xhtml+xml"/>
+    <item id="tpage" href="title.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cssjunk" href="cssjunk.xhtml" media-type="application/xhtml+xml"/>
+    <item id="fragment" href="fragment.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="c1"/>
+    <itemref idref="plates"/>
+    <itemref idref="plates2"/>
+    <itemref idref="divider"/>
+    <itemref idref="tpage"/>
+    <itemref idref="cssjunk"/>
+    <itemref idref="fragment"/>
+    <itemref idref="c2"/>
+  </spine>
+</package>
+"""
+
+PHOTOINSERT_NAV = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Contents</title></head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <ol>
+      <li><a href="ch1.xhtml">第一章</a></li>
+      <li><a href="ch2.xhtml">第二章</a></li>
+    </ol>
+  </nav>
+</body>
+</html>
+"""
+
+
+def _photoinsert_chapter(title: str) -> str:
+    """One chapter, prose-heavy enough that the image-only detector (which
+    samples the first chapters, package.py) sees a text book, not a scan."""
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>{title}</title></head>
+<body>
+  <h1>{title}</h1>
+  <p>{title} opens with enough prose that the book counts as a text book and
+     not a scan, and the words keep going well past the threshold, which is
+     the point of them: the photograph pages elsewhere in the spine must not
+     make the sampler mistake the whole book for a set of pictures.</p>
+  <p>A second paragraph, so the chapter is plainly prose rather than a title
+     page with a heading on it, and it too runs past the threshold on its way
+     to the end.</p>
+</body>
+</html>
+"""
+
+
+def _photoinsert_plate(caption: str) -> str:
+    """One photograph page, the shape of 自由的窄廊's 相片集 pages: the book's
+    own title in the head (which must not become the label), then the body —
+    the picture first, the caption that identifies it, then the credit."""
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Photo Insert Book</title></head>
+<body>
+  <p>　</p>
+  <p><img src="img/plate%20one.png" alt=""/></p>
+  <p>{caption}</p>
+  <p>© James Rodriguez</p>
+</body>
+</html>
+"""
+
+
+PHOTOINSERT_DIVIDER = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Divider</title></head>
+<body>
+  <p>　</p>
+</body>
+</html>
+"""
+
+PHOTOINSERT_TITLE = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Photo Insert Book</title></head>
+<body>
+  <p><img src="img/plate%20one.png" alt=""/></p>
+</body>
+</html>
+"""
+
+# A split conversion's fragment: a chapter chunk with an illustration buried
+# mid-page. Under a rule that only asked "a picture, with words somewhere
+# after it", 55 such pages of 福尔摩斯探案全集 put story sentences into the
+# drawer. A plate page opens with its picture; this one opens with its words.
+PHOTOINSERT_FRAGMENT = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Photo Insert Book</title></head>
+<body>
+  <p>红发俱乐部</p>
+  <p>去年的一个秋日，我去探望我朋友歇洛克·福尔摩斯先生。</p>
+  <p><img src="img/plate%20one.png" alt=""/></p>
+  <p>他把报纸摊在自己的膝盖上，脑袋前倾。</p>
+</body>
+</html>
+"""
+
+
+def write_photoinsert_epub(path) -> Path:
+    """A book whose nav names only its chapters while its spine carries its
+    photo plates too — the shape of 自由的窄廊's 相片集, whose nav and NCX
+    name none of its fifteen plate pages."""
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", CONTAINER)
+        zf.writestr("OEBPS/content.opf", PHOTOINSERT_OPF)
+        zf.writestr("OEBPS/nav.xhtml", PHOTOINSERT_NAV)
+        zf.writestr("OEBPS/ch1.xhtml", _photoinsert_chapter("第一章"))
+        zf.writestr("OEBPS/plates.xhtml",
+                    _photoinsert_plate("在咖啡園裡工作的瓜地馬拉婦女與小孩。"))
+        zf.writestr("OEBPS/plates2.xhtml",
+                    _photoinsert_plate("相片說明二" + "測" * 48 + "尾巴"))
+        zf.writestr("OEBPS/divider.xhtml", PHOTOINSERT_DIVIDER)
+        zf.writestr("OEBPS/title.xhtml", PHOTOINSERT_TITLE)
+        zf.writestr("OEBPS/cssjunk.xhtml",
+                    _photoinsert_plate("@page {padding: 0pt} body { text-align: center; }"))
+        zf.writestr("OEBPS/fragment.xhtml", PHOTOINSERT_FRAGMENT)
+        zf.writestr("OEBPS/ch2.xhtml", _photoinsert_chapter("第二章"))
+        zf.writestr("OEBPS/img/plate one.png", PNG)
+    return Path(path)
+
+
 # Real content DRM, modelled on epubx's fixture: an EncryptedKey means a
 # licence is in play, and epubx names the book `unsupported` at open.
 DRM_ENCRYPTION = """<?xml version="1.0" encoding="UTF-8"?>

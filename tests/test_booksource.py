@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fixtures import (  # noqa: E402
     write_epub,
     write_multiblock_note_epub,
+    write_photoinsert_epub,
     write_sectioned_epub,
     write_volume_epub,
 )
@@ -91,6 +92,43 @@ def test_toc_json_fills_chapters_a_volume_only_nav_leaves_out(tmp_path):
         ("Chapter 2", "OEBPS/vol1.xhtml", "c2"),
     ]
 
+
+
+def test_toc_lists_spine_pages_the_contents_never_names(tmp_path):
+    """A spine document no declared entry names is listed when — and only
+    when — it is a plate page: one that opens with its picture, caption
+    following. 自由的窄廊's text points at its photo inserts (書中相片集插頁
+    所示) while its nav and its NCX name none of its fifteen plates, so they
+    could only be paged to, one document at a time.
+
+    The label is the caption under the plate's first picture, not the page's
+    leading book-title prose, which would name every plate identically; a
+    caption longer than a label is cut to fit the drawer. The shapes that must
+    not enter are pinned beside the plates: a divider with no picture, a title
+    page whose picture is its last word, a page captioned by a style block,
+    and a split fragment that opens with its words and buries its illustration
+    mid-page — every shape a looser rule admitted (PITFALLS 8)."""
+    opened = Book.open(write_photoinsert_epub(tmp_path / "photos.epub"))
+    try:
+        tree = opened.toc_json()
+    finally:
+        opened.close()
+
+    assert [n["label"] for n in tree] == [
+        "第一章",
+        "在咖啡園裡工作的瓜地馬拉婦女與小孩。",
+        "相片說明二" + "測" * 43 + "…",
+        "第二章",
+    ]
+    assert [n["href"] for n in tree] == [
+        "OEBPS/ch1.xhtml",
+        "OEBPS/plates.xhtml",
+        "OEBPS/plates2.xhtml",
+        "OEBPS/ch2.xhtml",
+    ]
+    plate = tree[1]
+    assert plate["anchor"] is None
+    assert plate["children"] == []
 
 
 

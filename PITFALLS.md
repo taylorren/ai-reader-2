@@ -426,6 +426,72 @@ in the top bar.
 
 ---
 
+## 8. 書中相片集插頁所示 pointed at pages the contents never listed
+
+**Provenance: asked by the reader, on a real book.** 自由的窄廊: the text cites
+its photo insert by name — 曼朱從八歲起，就開始在咖啡園裡工作…（書中相片集插
+頁所示，是現在瓜地馬拉婦女和小孩在咖啡園中的景象） — and the plates could not
+be found. The drawer named 封面…版權頁 and stopped; the passage carried no link;
+nothing said where the photographs were. epubx had had them the whole time: the
+plates are fifteen spine documents (pic01…pic16, no pic11) holding 27
+photographs, they parse like any chapter and render from the book's own files —
+but the book declares no navigation for them. Not its nav, not its NCX: the
+publisher's contents names every chapter and none of the plates, and the
+outline fills only *headings*, so a drawer built on the declaration was
+faithfully listing a subset of the spine.
+
+Measured twice. `/api/book` returned 42 spine documents and a TOC tree that
+named not one pic page — the plates were reachable only by clicking 下一章
+eleven times past 引用書目, or by typing an index into the URL. And the epub
+itself: `unzip -l` lists `OEBPS/pic12.xhtml` and `OEBPS/image/a12-1.jpg` — the
+very photograph the passage points at
+（專制巨靈國家的經濟：瓜地馬拉種植咖啡的工人，很多是婦女與小孩）.
+
+**Fix:** `toc_json` in `booksource.py` measures the declared tree against the
+spine. A spine document no entry names — coverage is by href, so heading-filled
+chapters count as named — is listed when it is a *plate page*: the page opens
+with its picture, and the caption follows it. It enters just before the
+declared entry that follows it in the spine, so the drawer reads in the book's
+own order, and it is named by that caption, cut to one drawer line. The
+declared tree itself is never rewritten.
+
+Getting the shape right took three rules, each measured against the 301-book
+corpus before it was believed. *Any unlisted document*, labelled by its first
+prose: 27 books, 160 entries — a Calibre-split book's half-sentence fragments
+('Therefore , and'), two title pages' stylesheets ('@page {padding: 0pt;
+margin:0pt} body {…}'), a publisher's promo pages ('Thank you for downloading
+this Simon & Schuster eBook.'). *A picture with words somewhere after it*:
+still 160 — 福尔摩斯探案全集 alone put in 55 story sentences ('他把报纸摊在
+自己的膝盖上…'), because its split chapter chunks carry their illustrations
+mid-page; a novel's dialogue chunks and Star Wars chapter numbers ('1')
+followed from the same shape. *A page that opens with its picture*: 11 books,
+64 entries, and what remains is inserts — Mao: The Real Story's thirty photo
+captions, the corridor's fifteen plates, the Innovators' eleven, Killing
+Kennedy's photo page, the 企鹅欧洲史 galleries — plus a handful of title pages
+and back covers that really are a picture with words (a publisher's 'About
+Us' page, a cover's speech excerpt). A page that begins with its words is a
+chapter chunk, not an insert, however many pictures were dropped into it.
+
+**What pins it:**
+`tests/test_booksource.py::test_toc_lists_spine_pages_the_contents_never_names`,
+on `write_photoinsert_epub` (`tests/fixtures.py`), which models the insert — two
+captioned plates, one caption cut to a label — beside the shapes that must not
+enter: a blank divider, an image-only title page, a page captioned by a style
+block, and a split fragment whose illustration sits mid-page.
+
+**Lesson:** a declared TOC is a claim about the spine, not a map of it. The
+nav answers *how is the book structured*; the spine answers *what is in the
+book* — a reader needs both, so the two are measured against each other, not
+one trusted. But generosity toward the undeclared has to stay inside what the
+book presents as an insert: a page that opens with its picture. Anything wider
+hands a patch-revised book's leftovers — split fragments, style blocks, promo
+pages — to the drawer; both rejected drafts were caught by measuring against
+the corpus before they shipped, and the numbers above are why the third rule
+was the one kept. And the book's own prose knew all along: the text cited the
+very plates its contents would not name.
+
+---
+
 ## Why the suite was green for all of them
 
 None of these is a hole in coverage — every path is tested. Each was tested under

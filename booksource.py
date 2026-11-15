@@ -18,6 +18,34 @@ import zipfile
 
 import epubx
 
+# The block kinds whose text can name a page in the sidebar: the same prose a
+# highlight anchors to (ANCHOR_KINDS in routers/reader.py), because a caption
+# is a line a reader reads — a table, a list or a figure's empty text is not.
+LABEL_KINDS = frozenset(
+    ("paragraph", "heading", "quote", "preformatted", "definition"))
+
+# A caption is a label, not text: the drawer reads best at one line an entry,
+# and a plate's words can run on — a caption and a description under the same
+# picture share one block in some books.
+TOC_LABEL_CHARS = 48
+
+
+def _drawer_label(text: str | None) -> str | None:
+    """`text` as a drawer label — or None when it is not a reader's words.
+
+    A style block reaches the block walk as prose (two InDesign title pages in
+    the corpus put a stylesheet where text would be: '@page {padding: 0pt…}'),
+    so the punctuation of markup — braces and semicolons — disqualifies a
+    candidate. A label longer than the drawer's line is cut, not wrapped: the
+    caption's first clause is what tells one plate from another.
+    """
+    text = (text or "").strip()
+    if not text or text.startswith("@") or any(ch in text for ch in "{};"):
+        return None
+    if len(text) > TOC_LABEL_CHARS:
+        text = text[:TOC_LABEL_CHARS].rstrip() + "…"
+    return text
+
 
 class Book:
     """A book on disk, as the rest of this system sees it.
@@ -119,8 +147,23 @@ class Book:
         `outline`, not `toc`: the book's declared navigation with chapters
         filled in from its headings wherever the nav stops short (epubx's
         derived outline). A volume-only NCX then still offers a way into each
-        volume. It reads every chapter, so the caller pays that parse once per
-        book — the same work the reader does when it renders the chapter.
+        volume.
+
+        The outline claims, implicitly, that the book's navigation names every
+        document in its spine — and a real book can contradict it. A
+        publisher's photo insert is the case that hid: 自由的窄廊's text points
+        the reader at its plates (書中相片集插頁所示) while its nav and its NCX
+        leave all fifteen of them out, so the drawer named every chapter and
+        the plates were reachable only by paging one document at a time. A
+        spine document no declared entry names is listed here anyway when it
+        is a plate page — it opens with a picture, and its caption follows —
+        at its spine position among the entries around it (see
+        `_unlisted_page_label` for the shape, and for what looser rules once
+        let into the drawer).
+
+        The work is the outline's own: it already reads every chapter, so the
+        caller pays that parse once per book — the same work the reader does
+        when it renders the chapter.
         """
         if self._book is None:
             return []
@@ -132,7 +175,131 @@ class Book:
                 for n in nodes
             ]
 
-        return shape(self._book.outline)
+        return self._with_unlisted_pages(shape(self._book.outline))
+
+    # -- the spine pages the book's own contents never names ------------------
+
+    def _with_unlisted_pages(self, nodes: list[dict]) -> list[dict]:
+        """The declared tree with the spine's unlisted plate pages inserted.
+
+        Coverage is by href, so a chapter named only through a heading — an
+        anchor entry the outline filled in — counts as named. Each unlisted
+        spine document that is a plate page enters just before the declared
+        entry that follows it in the spine, so the drawer reads in the book's
+        own order: 自由的窄廊's fifteen plates land between 引用書目 and
+        版權頁, where the spine has them, not as a foreign tail after the
+        book's last entry.
+        """
+        if self._book is None:
+            return nodes
+
+        spine = self._book.spine
+        named: set[str] = set()
+
+        def collect(entries):
+            for entry in entries:
+                if entry["href"]:
+                    named.add(entry["href"])
+                collect(entry["children"])
+
+        collect(nodes)
+
+        additions: list[tuple[int, dict]] = []
+        for index, href in enumerate(spine):
+            if href in named:
+                continue
+            label = self._unlisted_page_label(index)
+            if label is not None:
+                additions.append((index, {"label": label, "href": href,
+                                           "anchor": None, "children": []}))
+        if not additions:
+            return nodes
+
+        position = {href: where for where, href in enumerate(spine)}
+        merged: list[dict] = []
+        added = 0
+        for entry in nodes:
+            where = position.get(entry["href"])
+            while (where is not None and added < len(additions)
+                   and additions[added][0] < where):
+                merged.append(additions[added][1])
+                added += 1
+            merged.append(entry)
+        merged.extend(page for _, page in additions[added:])
+        return merged
+
+    def _unlisted_page_label(self, index: int) -> str | None:
+        """A spine document the contents never named — if it is a plate page.
+
+        A plate page opens with its picture: the first meaningful block is a
+        figure and the caption follows it. That is how the missing plates are
+        shaped (自由的窄廊's fifteen 相片集 pages, Mao: The Real Story's photo
+        insert, the Innovators' picture sections, the 企鹅欧洲史 volumes'
+        gallery pages) — and it is also what keeps the residue out. Measured
+        against the 301-book corpus, two looser rules were tried and rejected:
+        "any unlisted document, labelled by its first prose" admitted a
+        split book's 39 half-sentence fragments ('Therefore , and') and two
+        title pages' stylesheets ('@page {padding: 0pt…}'); "a picture with
+        words somewhere after it" still admitted 55 split fragments whose
+        illustration sits mid-chapter (福尔摩斯探案全集: the label became the
+        story sentence that followed the picture), a novel's dialogue chunks,
+        Star Wars chapter-number headings, and publisher promo pages whose
+        logo leads but whose 'caption' is the blurb. A page that begins with
+        its words is a chapter chunk, not an insert — however many pictures
+        were dropped into it.
+
+        The head `<title>` reaches the block walk as a leading paragraph (a
+        footnote marker hung on the title must not vanish, content.py), so
+        the document's own title block is dropped before the first block is
+        judged (`_document_title`). Blocks can nest, so the walk is over the
+        whole block tree — the library's own idiom (Chapter.footnotes,
+        outline.py).
+        """
+        if self._book is None:
+            return None
+        chapter = self._book.chapters[index]
+        blocks = list(chapter.blocks)
+        head_title = self._document_title(chapter.href)
+        if (blocks and head_title
+                and blocks[0].kind in LABEL_KINDS
+                and (blocks[0].text or "").strip() == head_title):
+            blocks = blocks[1:]  # the head <title>, not the page's own words
+        meaningful = [
+            node
+            for block in blocks
+            for node in block  # nested blocks included
+            if node.kind == "figure" or (node.text or "").strip()
+        ]
+        if not meaningful or meaningful[0].kind != "figure":
+            return None
+        caption = next(
+            (node.text for node in meaningful[1:]
+             if node.kind in LABEL_KINDS and (node.text or "").strip()),
+            None,
+        )
+        return _drawer_label(caption)
+
+    def _document_title(self, href: str) -> str | None:
+        """The document's own `<head><title>` text, or None.
+
+        Only used to tell the head-title block from the page's own words
+        (`_unlisted_page_label`). This is a second parse of the document —
+        `Chapter.blocks` cached the block walk, not the element tree — and it
+        is paid once per spine page the contents never names: the pages in
+        question are plates and dividers, small by nature. The first `title`
+        element in document order is the head's.
+        """
+        if self._book is None:
+            return None
+        root = self._book.read_parsed(href)
+        if root is None:
+            return None
+        for element in root.iter():
+            tag = (element.tag.rsplit("}", 1)[-1].lower()
+                   if isinstance(element.tag, str) else "")
+            if tag == "title":
+                return "".join(element.itertext()).strip() or None
+        return None
 
     # -- the book's own files ----------------------------------------------
 

@@ -27,9 +27,9 @@ def corpus_books():
 def serve_tool():
     """epubx's MVP reader, loaded from its repo.
 
-    A path-installed epubx is copied into site-packages without its tools/
-    directory, so the file is looked up beside the installed package first
-    and then in the sibling checkout.
+    The published wheel ships the library but not its tools/ directory, so the
+    file is looked up beside the installed package first (a path install may
+    have it) and then in the sibling checkout.
     """
     import epubx
 
