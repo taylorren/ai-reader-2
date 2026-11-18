@@ -264,6 +264,26 @@ def test_a_completed_card_and_its_cover_differ_from_an_open_book(
     assert "completion-badge" not in back
 
 
+def test_the_completed_shelf_is_a_tab_and_the_cards_say_which_shelf(
+        isolated_client, isolated):
+    """The two shelves are a browser-side view of one server-rendered grid, so
+    the server carries both halves: the tab bar, and on every card the fact of
+    which shelf it belongs to. Without the marker the browser could only guess
+    by reading the progress line; without the tab a finished book would be
+    unreachable once the default view hides it.
+    """
+    slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
+
+    page = isolated_client.get("/").text
+    assert 'data-tab="reading"' in page
+    assert 'data-tab="completed"' in page
+    assert 'data-completed="false"' in card_markup(page, slug)
+
+    isolated_client.post(f"/api/books/{slug}/completion?completed=true")
+    done_card = card_markup(isolated_client.get("/").text, slug)
+    assert 'data-completed="true"' in done_card
+
+
 def test_library_progress_spans_the_book_not_the_current_chapter(
         isolated_client, isolated):
     """`scroll_percent` is within-chapter; the card must show book progress."""

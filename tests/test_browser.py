@@ -639,6 +639,10 @@ def test_a_completed_book_is_marked_on_the_shelf(browser, base_url, isolated):
     nothing to paint it. So the two cards are compared side by side, in the
     computed styles a reader's eye actually gets — a tinted card, a dimmed
     cover, a check drawn *on* the cover rather than beside it.
+
+    The completed card lives on its own tab, so the comparison happens there;
+    that a finished book is *absent* from the default shelf is asserted first,
+    because the tab would be pointless if it were not.
     """
     open_slug = upload_book(base_url,
                             write_epub(isolated / "open.epub", title="Open Book"))
@@ -653,6 +657,16 @@ def test_a_completed_book_is_marked_on_the_shelf(browser, base_url, isolated):
         page.goto(f"{base_url}/")
         done = page.locator(f'.book-card[data-slug="{done_slug}"]')
         plain = page.locator(f'.book-card[data-slug="{open_slug}"]')
+
+        # The shelf in view is the books still being read.
+        plain.wait_for(state="visible")
+        assert not done.is_visible(), (
+            "a completed book is still on the default (reading) shelf")
+
+        page.locator('.library-tab[data-tab="completed"]').click()
+        done.wait_for(state="visible")
+        assert not plain.is_visible(), (
+            "an unfinished book is on the completed shelf")
 
         def painted(locator, prop):
             """A computed style — what the browser paints with, not what we set."""
@@ -691,6 +705,65 @@ def test_a_completed_book_is_marked_on_the_shelf(browser, base_url, isolated):
                          badge_box["y"] + badge_box["height"] / 2)
         page.wait_for_url(lambda url: "/read/" in url)
         assert "/read/" in page.url
+    finally:
+        page.close()
+
+
+def test_finishing_a_book_moves_it_between_the_two_shelves(
+        browser, base_url, isolated):
+    """The reader's own round trip: mark a book complete from its card menu, and
+    it leaves the reading shelf for the Completed tab; mark it incomplete again
+    from there and it comes back.
+
+    The reload that follows each mark is why the shelf is kept in the URL hash —
+    without it the second step landed on the reading shelf, where the book no
+    longer was, and the menu that could bring it back was one shelf away.
+    """
+    slug = upload_book(base_url,
+                       write_epub(isolated / "finish.epub", title="Finish Book"))
+
+    page = browser.new_page()
+    page.on("dialog", lambda dialog: dialog.accept())
+    try:
+        page.goto(f"{base_url}/")
+        card = page.locator(f'.book-card[data-slug="{slug}"]')
+        card.wait_for(state="visible")
+
+        card.locator(".menu-btn").click()
+        card.locator(".dropdown-item", has_text="Mark as Completed").click()
+
+        # The reloaded page has it marked complete *and* off the reading shelf.
+        page.wait_for_function("""(slug) => {
+            const card = document.querySelector(`.book-card[data-slug="${slug}"]`);
+            return card && card.classList.contains('completed')
+                && card.classList.contains('hidden');
+        }""", arg=slug)
+
+        # It is on the Completed tab, and nowhere else.
+        page.locator('.library-tab[data-tab="completed"]').click()
+        card.wait_for(state="visible")
+
+        # Mark it incomplete from the shelf it is on now.
+        card.locator(".menu-btn").click()
+        card.locator(".dropdown-item", has_text="Mark as Incomplete").click()
+        page.wait_for_function("""(slug) => {
+            const card = document.querySelector(`.book-card[data-slug="${slug}"]`);
+            return card && !card.classList.contains('completed')
+                && card.classList.contains('hidden');
+        }""", arg=slug)
+
+        # The reload stayed on the completed shelf (the hash), which is now
+        # empty, so it says so rather than looking like a broken page.
+        assert page.url.endswith("#completed")
+        assert page.locator("#no-completed").is_visible()
+        assert page.locator("#no-results").is_hidden()
+        assert page.locator("#add-book-card").is_hidden()
+
+        # And the book is back where it was: the reading shelf.
+        page.locator('.library-tab[data-tab="reading"]').click()
+        card.wait_for(state="visible")
+        assert page.locator("#no-completed").is_hidden()
+        assert page.locator("#add-book-card").is_visible()
     finally:
         page.close()
 

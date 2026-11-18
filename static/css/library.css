@@ -102,6 +102,38 @@ body.dark-mode .upload-status.error { background: #3a2424; border-color: #6b3a3a
 main { max-width: 1200px; margin: 0 auto; }
 main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity: 0.75; }
 
+/* Two shelves: the books still in play (the default) and the ones finished.
+   Tabs rather than a filter, because the two do not overlap — a book is on one
+   or the other — while the letter index below filters whichever shelf is in
+   view. */
+.library-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 0 0 16px;
+    border-bottom: 1px solid var(--line);
+}
+
+.library-tab {
+    padding: 9px 16px;
+    margin-bottom: -1px;        /* sits on the row's border, not above it */
+    border: 1px solid transparent;
+    border-radius: 8px 8px 0 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.92em;
+    font-weight: 600;
+    cursor: pointer;
+}
+.library-tab:hover { color: var(--accent); }
+.library-tab.active {
+    background: var(--card);
+    border-color: var(--line);
+    /* The bottom border is the card's own colour, so the tab reads as joined
+       to the shelf under it rather than sitting on a line. */
+    border-bottom-color: var(--card);
+    color: var(--accent);
+}
+
 /* The letter index: one flat grid of books, filtered by a pill row (the
    reference reader's shape — grouping is the filter, not headings). */
 .library-index {
@@ -355,8 +387,13 @@ main.dragging { outline: 2px dashed var(--accent); outline-offset: 8px; opacity:
 }
 .add-icon { font-size: 3em; line-height: 1; color: var(--accent); }
 .add-text { font-size: 0.92em; }
+/* The add card belongs to the reading shelf: an upload lands there. Explicit,
+   because the `display: flex` above would beat the user-agent's `[hidden]`
+   rule the way it does for the empty letter pills (REVIEW P3-12). */
+.add-book-card.hidden { display: none; }
 
-#no-results { color: var(--muted); text-align: center; padding: 40px 0; }
+#no-results,
+#no-completed { color: var(--muted); text-align: center; padding: 40px 0; }
 
 @media (max-width: 560px) {
     body { padding: 20px 16px 60px; }

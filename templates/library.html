@@ -22,6 +22,19 @@
 
         <main id="book-area">
             {% if groups %}
+            <!-- Two shelves, not one: a book marked complete leaves the
+                 reading shelf for this one, so the default view stays the
+                 books still in play. The letter index below filters whichever
+                 shelf is in view. -->
+            <div class="library-tabs" role="tablist" aria-label="书架 (Shelves)">
+                <button type="button" class="library-tab active" data-tab="reading"
+                        role="tab" aria-selected="true"
+                        @click="setTab('reading')">在读 (Reading)</button>
+                <button type="button" class="library-tab" data-tab="completed"
+                        role="tab" aria-selected="false"
+                        @click="setTab('completed')">已完成 (Completed)</button>
+            </div>
+
             <div class="library-index">
                 <button type="button" class="library-index-link active" data-group="all"
                         @click="setGroupFilter('all', $event)">全部</button>
@@ -39,6 +52,7 @@
                              data-slug="{{ book.slug }}"
                              data-group="{{ book.title_group }}"
                              data-progress="{{ book.progress_percent }}"
+                             data-completed="{{ 'true' if book.is_completed else 'false' }}"
                              data-search="{{ (book.title ~ ' ' ~ book.author) | lower }}">
                         {% if book.is_completed %}
                         <!-- The mark a reader reads off the shelf: a check on the
@@ -114,13 +128,14 @@
                 {% endfor %}
                 {% endfor %}
 
-                <div class="add-book-card" @click="openFilePicker">
+                <div class="add-book-card" id="add-book-card" @click="openFilePicker">
                     <div class="add-icon">+</div>
                     <div class="add-text">Add New Book<br><small>Click to upload EPUB</small></div>
                 </div>
             </div>
 
             <div id="no-results" hidden>没有找到匹配的书 (No books match)</div>
+            <div id="no-completed" hidden>还没有读完的书 (No completed books yet)</div>
             <input type="file" id="file-input" accept=".epub" @change="handleFileUpload" hidden>
         </main>
     </div>
