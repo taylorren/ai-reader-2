@@ -1,6 +1,12 @@
-# The suite, the browser tests and the container — on every push and PR.
+# The suite, the browser tests and the container — run on demand.
 #
-# Three things this file exists to prevent, all of them observed here:
+# `Actions → CI → Run workflow` (or `gh workflow run CI`). It is deliberately not
+# triggered by pushes: a solo checkout already runs the suite before pushing, and
+# running it again on the same commit buys little. What this adds when asked for
+# is the environment the laptop is not: no `.env`, a freshly installed Chromium,
+# and the image under Docker with the library bind-mounted.
+#
+# Three things it exists to check, all of them observed here:
 #   * a browser test that skips in CI. `tests/test_browser.py` skips cleanly
 #     when Chromium is absent, which is right on a developer's laptop and wrong
 #     on a runner: 22 tests would report green without running. The workflow
@@ -22,9 +28,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:

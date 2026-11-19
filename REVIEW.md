@@ -2239,10 +2239,10 @@ the selection rules in one place for the bare-mark route and this one. Pinned by
 
 ### CI runs the suite and the container
 
-`.github/workflows/ci.yml` runs on every push and pull request: uv installs the
-locked environment, Chromium is installed with the libraries it needs, and
-`uv run pytest -q -rs` runs the Python suite, the Node units (through
-`tests/test_frontend.py`) and the browser tests.
+`.github/workflows/ci.yml` runs on demand (Actions → CI → Run workflow): uv
+installs the locked environment on Python 3.12, Chromium is installed with the
+libraries it needs, and `uv run pytest -q -rs` runs the Python suite, the Node
+units (through `tests/test_frontend.py`) and the browser tests.
 
 Two details are the point of it. The browser tests skip cleanly when Chromium is
 missing — correct on a laptop, wrong on a runner, where 22 tests would report
