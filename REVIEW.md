@@ -2170,3 +2170,82 @@ which makes a real selection in a real browser with the property removed.
 context. The stub DOM supplied a `navigator.clipboard` no LAN browser has. Both gaps are closed:
 the stub can now model an insecure origin (`clipboard: false`) and a refused write
 (`clipboard: "denied"`).
+
+---
+
+## Second review — 2026-11-19
+
+A second pass over the repository, after every item in this file had been applied,
+found five issues. Three are fixed here, each with the test that pins it. Two are
+left open on purpose — they are feature work rather than repairs — and are
+recorded at the end so they are not lost.
+
+### An upload could leave the shelf and the database disagreeing
+
+`POST /upload` moved the EPUB onto the shelf, *then* counted its words, *then*
+wrote the row, and closed the book only on success. Every failure after the move
+was permanent: a database error left a book file with no row (nothing ever looked
+at `books/`, only at `temp/`), a spine it could not read left the same, and a
+re-upload had already overwritten the working file before the new metadata was
+accepted — the old row then described a file that was no longer the old book. The
+staging copy itself ran outside any `finally`, so a client that vanished mid-body
+left a partial `.epub` in `temp/` until the next restart's sweep.
+
+The order is now the guarantee: parse and count from the staging file, stage the
+bytes beside the target as a `.part` file, write the row, and publish with one
+`os.replace`. A failure before that rename leaves the library exactly as it was (a
+re-upload's old file included); a failure after it rolls the row back. The
+request's `finally` removes the part, a folder it created, the staging file, and
+the book handle. The startup sweep now also clears old `books/<slug>/*.part` files
+and empty book folders — the artifacts a kill leaves after staging.
+
+Pinned by `tests/test_library.py::test_a_failed_upload_leaves_no_book_no_row_and_no_staging`,
+`::test_a_failed_word_count_leaves_nothing_on_the_shelf`,
+`::test_a_failed_reupload_keeps_the_book_it_had`,
+`::test_a_failed_staging_copy_leaves_no_partial_temp_file`,
+`::test_a_publish_that_fails_rolls_the_new_row_back`,
+`::test_a_failed_publish_keeps_the_old_book_and_row`, and
+`::test_the_sweep_clears_a_half_staged_book_and_its_empty_folder`. The
+cross-filesystem upload test still passes: the part is copied beside the book and
+renamed there.
+
+### A malformed edit could erase a saved note
+
+`PUT /api/ai/update/{id}` took a bare `dict` and wrote `payload.get("response", "")`.
+`{}` therefore replaced a note with an empty string; `{"response": null}` was a
+500 (NOT NULL); `{"response": 12345}` was stored as text. The panel always sends a
+non-empty string, so the hole was the API, not the reader — but a note is the
+reader's own words and the server should not guess.
+
+The body is `UpdateAnalysisRequest` now: a missing, null, blank or non-string
+`response` is a 422 before the handler runs, and a real edit is stored verbatim
+(two trailing spaces are Markdown's hard line break, so nothing is stripped).
+Deleting a note stays `DELETE /api/ai/delete/{id}`. Pinned by
+`tests/test_ai.py::test_an_edit_cannot_erase_a_note`.
+
+### A mark and its note could be committed separately
+
+`POST /api/ai/save` created the highlight (one connection, one commit) and then
+the analysis (another connection, another commit). If the second failed, the first
+survived: a mark with no text, which the reader saw in the highlights view, and a
+retry added a second mark for the same selection. (The delete paths already did
+both rows in one transaction; the write path was the outlier.)
+
+`Database.save_highlight_with_analysis` inserts both rows on one connection and
+commits once — both or neither — and `routers/highlights.highlight_fields` keeps
+the selection rules in one place for the bare-mark route and this one. Pinned by
+`tests/test_ai.py::test_a_failed_analysis_write_leaves_no_highlight`.
+
+### Still open
+
+- **AI budgets.** Completion requests carry no `max_tokens`, and a discussion
+  sends the whole history every turn; the 15/20 warnings count *messages*, not
+  characters or tokens. A manual summarize exists, but it sends the full
+  transcript too, so it fails exactly when it is needed, and continuing after a
+  summary still sends the whole history. Needs an output limit, an input budget,
+  server-side history compression, and a chunked summary.
+- **CI.** There is still no worked-in workflow, though this file and `SPEC.md`
+  speak as if there is one. A workflow should install Chromium *and fail if the
+  browser tests skip*, and its Docker smoke must bind-mount `/app/books` — without
+  the mount the cross-device upload path (PITFALLS 2) is never exercised.
+
