@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -363,9 +367,6 @@ def test_the_startup_sweep_removes_orphaned_uploads(isolated):
     The reader declined the size cap the finding also proposed: single user, own
     disk.
     """
-    import os
-    import time
-
     import routers.library
 
     staging = routers.library.BASE_DIR / "temp"
@@ -442,4 +443,205 @@ def test_a_slug_stored_before_the_fix_is_still_linked_safely(
     shell = isolated_client.get("/read/C%23%20in%20Depth/0").text
     assert 'href="/highlights/C%23%20in%20Depth"' in shell
     view = isolated_client.get("/highlights/C%23%20in%20Depth").text
+
     assert 'href="/read/C%23%20in%20Depth"' in view
+
+
+def test_a_failed_upload_leaves_no_book_no_row_and_no_staging(
+        isolated_client, isolated, db, monkeypatch):
+    """A failure after the parse leaves the library exactly as it was.
+
+    The upload used to move the EPUB onto the shelf first, then count words and
+    write the row: a database error left a book file with no row, and nothing
+    removed it (the startup sweep looked only at `temp/`). The metadata write is
+    now the step before the rename that publishes the file.
+    """
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+
+    def broken_upsert(self, row):
+        raise RuntimeError("metadata write failed")
+
+    monkeypatch.setattr(type(db), "upsert_book", broken_upsert)
+
+    with pytest.raises(RuntimeError):
+        upload(isolated_client, write_epub(isolated / "fixture.epub"))
+
+    assert list((isolated / "books").iterdir()) == [], "no folder, no EPUB"
+    assert db.list_books() == []
+    assert list((isolated / "temp").glob("*")) == [], "the staged copy is gone"
+
+
+def test_a_failed_word_count_leaves_nothing_on_the_shelf(
+        isolated_client, isolated, db, monkeypatch):
+    """The count happens before the move.
+
+    A spine that cannot be read must not leave a book file (and no row) for the
+    library to trip over on the next card render.
+    """
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+
+    def broken_count(book):
+        raise RuntimeError("the spine could not be read")
+
+    monkeypatch.setattr(routers.library, "estimate_book_word_count", broken_count)
+
+    with pytest.raises(RuntimeError):
+        upload(isolated_client, write_epub(isolated / "fixture.epub"))
+
+    assert list((isolated / "books").iterdir()) == []
+    assert db.list_books() == []
+    assert list((isolated / "temp").glob("*")) == []
+
+
+def test_a_failed_reupload_keeps_the_book_it_had(
+        isolated_client, isolated, db, monkeypatch):
+    """A re-upload publishes the new EPUB only after its row is accepted.
+
+    The move used to overwrite the old file before the new row was written: a
+    failed re-upload destroyed a working book and left its old metadata
+    describing the new file. Now the old book is untouched until the rename.
+    """
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+    slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
+    folder = isolated / "books" / slug
+    book_path = folder / f"{slug}.epub"
+    original = book_path.read_bytes()
+    before = db.get_book(slug)
+
+    # Same identifier and same slug; different bytes, because the title gains a
+    # trailing space that the slug trims.
+    replacement = write_epub(isolated / "b.epub", title="Fixture Book ")
+    assert replacement.read_bytes() != original
+
+    def broken_upsert(self, row):
+        raise RuntimeError("metadata write failed")
+
+    monkeypatch.setattr(type(db), "upsert_book", broken_upsert)
+    with pytest.raises(RuntimeError):
+        upload(isolated_client, replacement)
+
+    assert book_path.read_bytes() == original, "the old book was not replaced"
+    assert db.get_book(slug) == before
+    assert sorted(p.name for p in folder.iterdir()) == [f"{slug}.epub"]
+
+
+def test_a_publish_that_fails_rolls_the_new_row_back(
+        isolated_client, isolated, db, monkeypatch):
+    """The last window: the row is written, the rename that publishes the file
+    fails. A fresh book must not keep a row pointing at nothing.
+
+    SQLite and the filesystem cannot commit together; the upload narrows the
+    window to one rename and undoes the row when even that fails.
+    """
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+    real_replace = os.replace
+
+    def broken_publish(source, target):
+        if str(source).endswith(".part"):
+            raise OSError("publish failed")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(routers.library.os, "replace", broken_publish)
+
+    with pytest.raises(OSError):
+        upload(isolated_client, write_epub(isolated / "fixture.epub"))
+
+    assert db.list_books() == [], "the row was rolled back"
+    assert list((isolated / "books").iterdir()) == []
+
+
+def test_a_failed_publish_keeps_the_old_book_and_row(
+        isolated_client, isolated, db, monkeypatch):
+    """The same window on a re-upload: the old book and its metadata survive."""
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+    slug = upload(isolated_client, write_epub(isolated / "a.epub")).json()["slug"]
+    folder = isolated / "books" / slug
+    book_path = folder / f"{slug}.epub"
+    original = book_path.read_bytes()
+    before = db.get_book(slug)
+
+    real_replace = os.replace
+
+    def broken_publish(source, target):
+        if str(source).endswith(".part"):
+            raise OSError("publish failed")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(routers.library.os, "replace", broken_publish)
+
+    with pytest.raises(OSError):
+        upload(isolated_client, write_epub(isolated / "b.epub", title="Fixture Book "))
+
+    assert db.get_book(slug) == before, "the row was restored"
+    assert book_path.read_bytes() == original
+    assert sorted(p.name for p in folder.iterdir()) == [f"{slug}.epub"]
+
+
+def test_a_failed_staging_copy_leaves_no_partial_temp_file(
+        isolated_client, isolated, monkeypatch):
+    """A copy that dies mid-body used to leave a partial `.epub` in `temp/`.
+
+    That file was outside the upload's `try/finally`, so only the next
+    restart's sweep could remove it.
+    """
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+
+    def broken_copy(source, target, *args, **kwargs):
+        target.write(b"partial")
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(routers.library.shutil, "copyfileobj", broken_copy)
+
+    with pytest.raises(OSError):
+        upload(isolated_client, write_epub(isolated / "fixture.epub"))
+
+    assert list((isolated / "temp").glob("*")) == []
+
+
+def test_the_sweep_clears_a_half_staged_book_and_its_empty_folder(isolated,
+                                                                 monkeypatch):
+    """The other artifacts a kill leaves: a `.part` and an empty book folder.
+
+    Both live under `books/`, which the startup sweep never looked at. Neither
+    is a book, and only old ones go — a sweep must not race an upload.
+    """
+    import routers.library
+
+    monkeypatch.setattr(routers.library, "BASE_DIR", isolated)
+    books = isolated / "books"
+
+    half = books / "Half Book"
+    half.mkdir()
+    part = half / "Half Book.epub.part"
+    part.write_bytes(b"half a book")
+    old = time.time() - 7200
+    os.utime(part, (old, old))
+    os.utime(half, (old, old))
+
+    empty = books / "Empty Book"
+    empty.mkdir()
+    os.utime(empty, (old, old))
+
+    fresh = books / "Fresh Book"
+    fresh.mkdir()
+    landing = fresh / "Fresh Book.epub.part"
+    landing.write_bytes(b"an upload in flight")
+
+    removed = routers.library.sweep_uploads()
+    assert removed >= 2
+    assert not half.exists()
+    assert not empty.exists()
+    assert landing.exists(), "a young part is left alone"
+    assert fresh.exists()

@@ -151,41 +151,120 @@ def library_card(row: dict) -> dict:
 
 # -- upload ---------------------------------------------------------------
 
-# A staging file is normally removed by the upload's own `finally`. A killed
-# process cannot run it, so orphans accumulate silently — the sweep below clears
-# them at startup (REVIEW P3-10).
+# An upload cleans up after itself in `finally`. A killed process cannot run it,
+# so half-written artifacts accumulate silently — the sweep below clears them at
+# startup (REVIEW P3-10). Three kinds: a staging file in `temp/`, a `.part` beside
+# a book, and the empty folder a kill can leave before a file lands.
 UPLOAD_ORPHAN_AGE_SECONDS = 3600
 
 
 def sweep_uploads(max_age_seconds: int = UPLOAD_ORPHAN_AGE_SECONDS) -> int:
-    """Remove staging files an interrupted upload left behind, and say how many.
+    """Remove half-finished uploads an interrupted process left behind.
 
-    Only `temp/*.epub`, and only files older than `max_age_seconds`, so a sweep
-    can never race an upload that is in flight. The reader decided against a
-    size cap on uploads (single user, own disk); this is the half of P3-10 that
-    was worth having.
+    Three artifacts, all older than `max_age_seconds` so a sweep can never race
+    an upload that is in flight: `temp/*.epub` (killed between the copy and the
+    move), `books/<slug>/*.part` (killed between staging and the rename that
+    publishes the book), and the empty `books/<slug>/` an upload that died
+    before its file landed leaves behind. A book file is never touched: this
+    clears only artifacts no reader could open.
+
+    Runs at startup (`server.py`), where no upload is in flight. The reader
+    decided against a size cap on uploads (single user, own disk); this is the
+    other half of P3-10, and the recovery for a kill the request's own
+    `finally` cannot cover.
     """
-    staging = BASE_DIR / "temp"
-    if not staging.is_dir():
-        return 0
     cutoff = time.time() - max_age_seconds
     removed = 0
-    for leftover in staging.glob("*.epub"):
+
+    def old(path: Path) -> bool:
         try:
-            if leftover.stat().st_mtime < cutoff:
-                leftover.unlink()
+            return path.stat().st_mtime < cutoff
+        except OSError:
+            return False
+
+    staging = BASE_DIR / "temp"
+    if staging.is_dir():
+        for leftover in staging.glob("*.epub"):
+            try:
+                if old(leftover):
+                    leftover.unlink()
+                    removed += 1
+            except OSError:
+                continue        # gone already, or not ours to remove: leave it
+
+    books = app_state.BOOKS_DIR
+    if not books.is_dir():
+        return removed
+    for folder in books.iterdir():
+        if not folder.is_dir():
+            continue
+        # Decided before a part is unlinked: deleting the part updates the
+        # folder's mtime, which would make the folder look young again.
+        folder_old = old(folder)
+        for part in folder.glob("*.part"):
+            try:
+                if old(part):
+                    part.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        try:
+            if folder_old and not any(folder.iterdir()):
+                folder.rmdir()
                 removed += 1
         except OSError:
-            continue        # gone already, or not ours to remove: leave it
+            continue            # not empty (a book is landing), or already gone
     return removed
+
+
+def _stage_upload(file: UploadFile, temp_path: Path) -> None:
+    """Write the request body to `temp_path`, removing a partial copy on failure.
+
+    This runs before the `try/finally` that owns the staging file, so it has to
+    clean up itself: a copy that dies — client gone, disk full — used to leave
+    a partial `.epub` in `temp/` that only a restart cleared.
+    """
+    try:
+        with open(temp_path, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _stage_beside(source: Path, part: Path) -> None:
+    """Put the upload's bytes on the part's filesystem, not yet in place.
+
+    `part` sits beside the book it will become, so the rename that publishes it
+    is same-filesystem and atomic. A rename is tried first — the usual case,
+    where `temp/` and `books/` share a filesystem — and the staging file itself
+    becomes the part. When they do not, `os.replace` raises `EXDEV`: in the
+    container `/app/temp` lives in the image layer while `/app/books` is a bind
+    mount, and every upload used to die there with `Invalid cross-device link`.
+    The fallback copies instead, into the same place.
+    """
+    try:
+        os.replace(source, part)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+    shutil.copyfile(source, part)
 
 
 @router.post("/upload")
 def upload_book(file: UploadFile = File(...)):
-    """Upload → stored → metadata extracted, in one step. No subprocess.
+    """Upload → validated → stored, in one step. No subprocess.
 
-    Sync on purpose: FastAPI runs this handler in a threadpool, which is
-    where the CPU-bound parse and word count belong.
+    Sync on purpose: FastAPI runs this handler in a threadpool, which is where
+    the CPU-bound parse and word count belong.
+
+    The order is the guarantee: the EPUB is parsed *and* counted while it is
+    still a staging file, its row is written next, and only then does one
+    rename publish it on the shelf. A failure anywhere before that rename
+    leaves the library exactly as it was — including a re-upload, whose old
+    file is not touched until the new metadata has been accepted. The rename
+    is `os.replace`, so a reader never sees a half-written book.
     """
 
     safe_filename = os.path.basename((file.filename or "").replace("\\", "/"))
@@ -195,9 +274,12 @@ def upload_book(file: UploadFile = File(...)):
     temp_dir = BASE_DIR / "temp"
     temp_dir.mkdir(exist_ok=True)
     temp_path = temp_dir / f"{uuid.uuid4().hex}.epub"
-    with open(temp_path, "wb") as out:
-        shutil.copyfileobj(file.file, out)
+    _stage_upload(file, temp_path)
 
+    book = None
+    part = None
+    folder = None
+    created_folder = False
     try:
         book = Book.open(temp_path)
         if not book.opened:
@@ -205,8 +287,14 @@ def upload_book(file: UploadFile = File(...)):
             raise HTTPException(status_code=400,
                                 detail=book.unsupported or "unopenable book")
 
-        db = get_db()
+        # Everything that reads the EPUB happens before the shelf is touched:
+        # a parse that fails here leaves only the staging file to clean up,
+        # and a re-upload's old book is still the book the library has.
         title = book.title or os.path.splitext(safe_filename)[0]
+        word_count = 0 if book.unsupported else estimate_book_word_count(book)
+        reason = book.unsupported
+
+        db = get_db()
         slug = sanitize_folder_name(title) or "book"
         existing = db.get_book(slug)
         if existing is not None and _same_book(existing, book):
@@ -218,12 +306,14 @@ def upload_book(file: UploadFile = File(...)):
             replaced = False
 
         folder = app_state.BOOKS_DIR / target_slug
+        created_folder = not folder.exists()
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / f"{target_slug}.epub"
-        _move_into_place(temp_path, target)
+        # Unique per request: two uploads of the same new book must not stage
+        # over each other's bytes between the write and the rename.
+        part = target.with_name(f"{target.name}.{uuid.uuid4().hex}.part")
+        _stage_beside(temp_path, part)
 
-        word_count = 0 if book.unsupported else estimate_book_word_count(book)
-        reason = book.unsupported
         db.upsert_book({
             "slug": target_slug,
             # The path is relative to the books directory: books/<slug>/<slug>.epub
@@ -241,14 +331,35 @@ def upload_book(file: UploadFile = File(...)):
             "added_at": (existing["added_at"] if replaced
                          else datetime.now().isoformat()),
         })
+
+        try:
+            os.replace(part, target)
+        except OSError:
+            # The row ran ahead of the shelf. Put the metadata back (a fresh
+            # book loses its row) so the two agree again, then fail.
+            if replaced:
+                db.upsert_book(existing)
+            else:
+                db.delete_book(target_slug)
+            raise
         book_cache.drop(target_slug)  # a replaced file must be re-opened
-        book.close()
 
         return {"status": "success", "slug": target_slug, "title": title,
                 "replaced": replaced, "unsupported": reason}
     finally:
-        if temp_path.exists():
-            temp_path.unlink()
+        # The staged file and the folder are removed only while they are still
+        # ours to remove: after a successful publish the part is gone and the
+        # folder holds a book.
+        if part is not None:
+            part.unlink(missing_ok=True)
+        if created_folder and folder is not None:
+            try:
+                folder.rmdir()          # only if nothing landed in it
+            except OSError:
+                pass
+        if book is not None:
+            book.close()
+        temp_path.unlink(missing_ok=True)
 
 
 def _same_book(row: dict, book: Book) -> bool:
@@ -262,38 +373,6 @@ def _same_book(row: dict, book: Book) -> bool:
         return row["identifier"] == book.identifier
     return ((row["title"] or "") == (book.title or "")
             and (row["author"] or "") == (book.author or ""))
-
-
-def _move_into_place(source: Path, target: Path) -> None:
-    """Move a staged upload onto the shelf, across filesystems if need be.
-
-    `os.replace` is the atomic choice and it is what this was — but it needs
-    both paths on one filesystem, and in the container they are two: the
-    staging directory (`/app/temp`) lives in the image's own layer while the
-    books directory (`/app/books`) is a bind mount. Every upload died with
-    `Invalid cross-device link` and a 500 on the one step the library depends
-    on — found by smoke-testing the 2.0.0 image, invisible on a host where the
-    two are the same directory tree.
-
-    A cross-device move therefore copies into a `.part` file *beside the
-    target* and renames that into place: atomic again, on the filesystem that
-    matters, and it overwrites an existing book on a re-upload exactly as
-    `os.replace` did. The staged file itself is removed by the upload's own
-    `finally`, which owns its lifetime.
-    """
-    try:
-        os.replace(source, target)
-        return
-    except OSError as exc:
-        if exc.errno != errno.EXDEV:
-            raise
-
-    staging = target.with_name(f"{target.name}.part")
-    try:
-        shutil.copyfile(source, staging)
-        os.replace(staging, target)
-    finally:
-        staging.unlink(missing_ok=True)
 
 
 # -- delete ---------------------------------------------------------------

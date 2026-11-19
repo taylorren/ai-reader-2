@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
 
     orphans = sweep_uploads()
     if orphans:
-        print(f"✓ Removed {orphans} orphaned upload(s) from temp/")
+        print(f"✓ Removed {orphans} orphaned upload artifact(s)")
     yield
     from routers.app_state import get_ai_service
 
