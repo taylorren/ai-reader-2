@@ -711,14 +711,23 @@ def test_the_excerpt_labels_the_selection_between_its_halves():
 
 
 
-def test_both_response_shapes_are_read():
+def test_both_response_shapes_are_read(monkeypatch):
     """Ollama answers the bare OpenAI body; the Cline API wraps it in
-    `{"data": {...}, "success": true}`. Both must yield the message text."""
+    `{"data": {...}, "success": true}`. Both must yield the message text.
+
+    The ollama settings are set here rather than read from a developer's `.env`:
+    CI has none, and this test used to pass in the full suite only because
+    another test imported `server` (whose import loads `.env`) first.
+    """
     import asyncio
 
     import httpx
 
     from ai_service import AIService
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.test/v1")
+    monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
+    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
 
     body = {"choices": [{"message": {"content": "the answer"}}]}
 
