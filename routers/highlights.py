@@ -103,32 +103,51 @@ def highlight_kind(highlight: dict) -> str:
     return analyses[0]["analysis_type"] if analyses else "highlight"
 
 
+def highlight_fields(book_id: str, chapter_index: int, selected_text: str,
+                     chapter_path: str | None = None,
+                     block_id: str | None = None,
+                     context_before: str = "", context_after: str = "") -> dict:
+    """Validate a selection and shape the row a highlight is stored from.
+
+    The one place the selection rules live. `POST /api/highlight` stores a bare
+    mark from these fields; `/api/ai/save` stores the mark *and* its first
+    analysis from the same fields, in one transaction, so the two routes cannot
+    disagree about what a highlight is.
+    """
+    spine_path = _require_chapter(book_id, chapter_index)
+    selected = (selected_text or "").strip()
+    if not selected:
+        raise HTTPException(status_code=400, detail="Empty selection")
+    return {"book_id": book_id, "chapter_index": chapter_index,
+            "selected_text": selected,
+            "chapter_path": chapter_path or spine_path,
+            "block_id": block_id,
+            "context_before": context_before,
+            "context_after": context_after}
+
+
 def store_highlight(book_id: str, chapter_index: int, selected_text: str,
                     chapter_path: str | None = None,
                     block_id: str | None = None,
                     context_before: str = "", context_after: str = "") -> int:
     """Validate and store a highlight, returning its id.
 
-    The one place a highlight row is written: the highlight route and saving
-    an analysis both come through here, so the reader's mark is created the
-    same way whichever endpoint carries it.
+    The bare-mark route's writer. The *panel* does not use this endpoint: it
+    saves a mark and its content in one act through `/api/ai/save`, which
+    stores both rows in one transaction — so an explanation the reader never
+    saved leaves nothing behind, and a failure on either row leaves neither.
 
-    The *panel* only reaches it with content — the mark is created in the same
-    act as the analysis it hangs on, so an explanation the reader never saves
-    leaves nothing behind — but the row itself can stand alone, and
-    `POST /api/highlight` stores exactly that. (The docstring here used to claim
-    otherwise, which contradicted the route below it — REVIEW P3-7.)
+    The row itself can still stand alone, and `POST /api/highlight` stores
+    exactly that. The endpoint exists for the two things that need a bare mark
+    on purpose — the tests, which use it to build the "highlight with no
+    analyses" state the views must render, and any future import that brings
+    marks over without their text. (The docstring here used to claim the panel
+    could not reach it, which contradicted the route below it — REVIEW P3-7.)
     """
-    spine_path = _require_chapter(book_id, chapter_index)
-    selected = (selected_text or "").strip()
-    if not selected:
-        raise HTTPException(status_code=400, detail="Empty selection")
-    return get_db().save_highlight(
-        book_id, chapter_index, selected,
-        chapter_path=chapter_path or spine_path,
-        block_id=block_id,
-        context_before=context_before, context_after=context_after,
-    )
+    return get_db().save_highlight(**highlight_fields(
+        book_id, chapter_index, selected_text,
+        chapter_path=chapter_path, block_id=block_id,
+        context_before=context_before, context_after=context_after))
 
 
 @router.post("/api/highlight")

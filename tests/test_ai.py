@@ -165,6 +165,58 @@ def test_an_analysis_is_saved_edited_and_deleted(isolated_client, isolated,
     assert db.get_highlight(highlight_id) is None
 
 
+def test_an_edit_cannot_erase_a_note(isolated_client, isolated, upload, db):
+    """A typed body: `{}` (or a null/number/blank) is a 422, not an empty note.
+
+    The route took a bare dict and defaulted a missing `response` to "", so a
+    malformed request erased the reader's words — `null` was a 500, and a number
+    was stored as text. Only a real edit may change a saved note.
+    """
+    slug = upload()
+    highlight_id = make_highlight(isolated_client, slug)
+    analysis_id = isolated_client.post("/api/ai/save", json={
+        "highlight_id": highlight_id, "analysis_type": "comment",
+        "prompt": "", "response": "a note worth keeping"}).json()["analysis_id"]
+
+    for body in ({}, {"response": None}, {"response": 12345},
+                 {"response": "   "}, {"note": "changed"}):
+        response = isolated_client.put(f"/api/ai/update/{analysis_id}", json=body)
+        assert response.status_code == 422, body
+        assert db.get_analysis(analysis_id)["response"] == "a note worth keeping"
+
+    # A real edit lands verbatim — trailing spaces included: two of them are
+    # Markdown's hard line break, not something to tidy away.
+    kept = "第一行  \n第二行"
+    assert isolated_client.put(f"/api/ai/update/{analysis_id}",
+                               json={"response": kept}).status_code == 200
+    assert db.get_analysis(analysis_id)["response"] == kept
+
+
+def test_a_failed_analysis_write_leaves_no_highlight(
+        isolated_client, isolated, upload, db, monkeypatch):
+    """The mark and its text are one transaction.
+
+    They used to commit separately: when the analysis insert failed, the
+    highlight survived on its own — a mark the reader could not account for,
+    and a retry added a second one for the same selection. Both rows or neither.
+    """
+    slug = upload()
+    before = db.highlights_for(slug)
+
+    def broken_insert(conn, *args, **kwargs):
+        raise RuntimeError("analysis write failed")
+
+    monkeypatch.setattr(type(db), "_insert_analysis", staticmethod(broken_insert))
+
+    with pytest.raises(RuntimeError):
+        isolated_client.post("/api/ai/save", json={
+            "book_id": slug, "chapter_index": 0,
+            "selected_text": "a selection whose note fails",
+            "analysis_type": "comment", "response": "the note"})
+
+    assert db.highlights_for(slug) == before, "the mark was left behind"
+
+
 def test_save_rejects_an_unknown_analysis_type(isolated_client, isolated,
                                               upload, db):
     """P2-11: `/api/ai/analyze` refused anything but its kinds while

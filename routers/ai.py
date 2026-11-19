@@ -19,13 +19,13 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from ai_service import PROVIDERS, AIServiceError
 
 from .app_state import (default_provider, get_ai_service, get_db,
                         runtime_settings)
-from .highlights import store_highlight
+from .highlights import highlight_fields
 
 router = APIRouter()
 
@@ -83,6 +83,31 @@ class ConversationMessage(BaseModel):
     # rewrite the model's instructions (REVIEW P2-11).
     role: Literal["user", "assistant"]
     content: str
+
+
+class UpdateAnalysisRequest(BaseModel):
+    """The edited text of a saved analysis — the note in the panel's textarea.
+
+    A typed body, not the bare dict this route used to take. `{}` meant an
+    empty note (the missing key defaulted to ""), so a malformed request erased
+    the reader's words; `null` reached SQLite as NULL and raised; a number was
+    stored as text. Only text the reader actually wrote replaces a saved note —
+    removing one is what DELETE is for.
+    """
+
+    response: str
+
+    @field_validator("response")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        """Reject a blank edit, keep the text verbatim.
+
+        Not `.strip()`: Markdown's two trailing spaces are a hard line break,
+        and an edit that round-trips through the panel must keep them.
+        """
+        if not value.strip():
+            raise ValueError("response must not be blank")
+        return value
 
 
 class DiscussionStartRequest(BaseModel):
@@ -160,21 +185,27 @@ def save_analysis(req: SaveAnalysisRequest):
 
     A highlight is the mark a saved analysis hangs on: creating it here, in
     the same act, is what keeps an unsaved explanation from leaving a mark.
+    The two rows are one transaction (`Database.save_highlight_with_analysis`),
+    so a failure on the analysis cannot leave the mark behind either.
     """
-    highlight_id = req.highlight_id
-    if highlight_id is None:
+    if req.highlight_id is None:
         if not req.book_id or req.chapter_index is None or not req.selected_text:
             raise HTTPException(
                 status_code=400,
                 detail="A new highlight needs a book, a chapter and a selection")
-        highlight_id = store_highlight(
-            req.book_id, req.chapter_index, req.selected_text,
-            block_id=req.block_id,
-            context_before=req.context_before, context_after=req.context_after)
+        highlight_id, analysis_id = get_db().save_highlight_with_analysis(
+            **highlight_fields(
+                req.book_id, req.chapter_index, req.selected_text,
+                block_id=req.block_id,
+                context_before=req.context_before,
+                context_after=req.context_after),
+            analysis_type=req.analysis_type, prompt=req.prompt,
+            response=req.response)
     else:
-        _require_highlight(highlight_id)
-    analysis_id = get_db().save_analysis(
-        highlight_id, req.analysis_type, req.prompt, req.response)
+        _require_highlight(req.highlight_id)
+        highlight_id = req.highlight_id
+        analysis_id = get_db().save_analysis(
+            highlight_id, req.analysis_type, req.prompt, req.response)
     return {"analysis_id": analysis_id, "highlight_id": highlight_id,
             "status": "success"}
 
@@ -242,12 +273,17 @@ async def summarize_discussion(req: DiscussionSummarizeRequest):
 
 
 @router.put("/api/ai/update/{analysis_id}")
-def update_analysis(analysis_id: int, payload: dict):
-    """Edit a saved analysis' text (an edited note)."""
+def update_analysis(analysis_id: int, req: UpdateAnalysisRequest):
+    """Edit a saved analysis' text (an edited note).
+
+    The body is an `UpdateAnalysisRequest`: a missing, null, blank or non-string
+    `response` is a 422 before this function runs, so a malformed edit cannot
+    replace a note with nothing.
+    """
     db = get_db()
     if db.get_analysis(analysis_id) is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
-    db.update_analysis(analysis_id, payload.get("response", ""))
+    db.update_analysis(analysis_id, req.response)
     return {"status": "success"}
 
 

@@ -241,20 +241,33 @@ class Database:
 
     # -- annotations ---------------------------------------------------------
 
+    @staticmethod
+    def _insert_highlight(conn: sqlite3.Connection, book_id: str,
+                          chapter_index: int, selected_text: str,
+                          chapter_path: str | None = None,
+                          block_id: str | None = None,
+                          context_before: str = "",
+                          context_after: str = "") -> int:
+        """INSERT one highlight on `conn`; the caller commits and closes."""
+        cursor = conn.execute("""
+            INSERT INTO highlights (book_id, chapter_index, chapter_path,
+                                    block_id, selected_text, context_before,
+                                    context_after, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (book_id, chapter_index, chapter_path, block_id, selected_text,
+              context_before, context_after, datetime.now().isoformat()))
+        return cursor.lastrowid
+
     def save_highlight(self, book_id: str, chapter_index: int, selected_text: str,
                        chapter_path: str | None = None, block_id: str | None = None,
                        context_before: str = "", context_after: str = "") -> int:
         conn = self._connect()
         try:
-            cursor = conn.execute("""
-                INSERT INTO highlights (book_id, chapter_index, chapter_path,
-                                        block_id, selected_text, context_before,
-                                        context_after, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (book_id, chapter_index, chapter_path, block_id, selected_text,
-                  context_before, context_after, datetime.now().isoformat()))
+            highlight_id = self._insert_highlight(
+                conn, book_id, chapter_index, selected_text, chapter_path,
+                block_id, context_before, context_after)
             conn.commit()
-            return cursor.lastrowid
+            return highlight_id
         finally:
             conn.close()
 
@@ -303,18 +316,55 @@ class Database:
 
     # -- analyses --------------------------------------------------------------
 
+    @staticmethod
+    def _insert_analysis(conn: sqlite3.Connection, highlight_id: int,
+                         analysis_type: str, prompt: str,
+                         response: str) -> int:
+        """INSERT one analysis on `conn`; the caller commits and closes."""
+        cursor = conn.execute("""
+            INSERT INTO ai_analyses (highlight_id, analysis_type, prompt,
+                                     response, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (highlight_id, analysis_type, prompt, response,
+              datetime.now().isoformat()))
+        return cursor.lastrowid
+
+    def save_highlight_with_analysis(
+            self, book_id: str, chapter_index: int, selected_text: str,
+            analysis_type: str, prompt: str, response: str,
+            chapter_path: str | None = None, block_id: str | None = None,
+            context_before: str = "", context_after: str = "") -> tuple[int, int]:
+        """Insert a highlight and its first analysis in one transaction.
+
+        They are one act to the reader — the mark exists only because the
+        analysis it carries was saved (SPEC) — but they used to be two
+        connections with two commits. When the second failed, the first
+        survived: a mark with no text, which the reader saw as a highlight, and
+        a retry then saved the same selection a second time. One connection,
+        one commit: both rows or neither.
+
+        Returns `(highlight_id, analysis_id)`.
+        """
+        conn = self._connect()
+        try:
+            highlight_id = self._insert_highlight(
+                conn, book_id, chapter_index, selected_text, chapter_path,
+                block_id, context_before, context_after)
+            analysis_id = self._insert_analysis(
+                conn, highlight_id, analysis_type, prompt, response)
+            conn.commit()
+            return highlight_id, analysis_id
+        finally:
+            conn.close()
+
     def save_analysis(self, highlight_id: int, analysis_type: str, prompt: str,
                       response: str) -> int:
         conn = self._connect()
         try:
-            cursor = conn.execute("""
-                INSERT INTO ai_analyses (highlight_id, analysis_type, prompt,
-                                         response, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (highlight_id, analysis_type, prompt, response,
-                  datetime.now().isoformat()))
+            analysis_id = self._insert_analysis(
+                conn, highlight_id, analysis_type, prompt, response)
             conn.commit()
-            return cursor.lastrowid
+            return analysis_id
         finally:
             conn.close()
 
