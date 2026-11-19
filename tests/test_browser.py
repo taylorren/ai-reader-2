@@ -18,6 +18,10 @@ The whole module skips unless playwright and its browser are both present:
 
     uv add --dev playwright && uv run playwright install chromium
 
+In CI that skip is a failure instead: the workflow sets `CI_REQUIRE_BROWSER=1`,
+because a runner without Chromium would otherwise report 22 green skips and this
+module would quietly stop covering the findings it exists for.
+
 That is the one dependency the suite cannot work around, and the findings here
 are exactly the ones a stub DOM cannot see: a stylesheet rule that never
 applied, a sandbox that did its job.
@@ -25,6 +29,7 @@ applied, a sandbox that did its job.
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -32,10 +37,20 @@ from urllib.parse import quote
 
 import pytest
 
-sync_api = pytest.importorskip(
-    "playwright.sync_api",
-    reason="playwright is not installed (uv add --dev playwright)",
-)
+REQUIRE_BROWSER = bool(os.getenv("CI_REQUIRE_BROWSER"))
+
+if REQUIRE_BROWSER:
+    try:
+        import playwright.sync_api as sync_api
+    except ImportError as exc:      # pragma: no cover - CI's failure, not pytest's
+        pytest.fail(
+            f"CI_REQUIRE_BROWSER is set but playwright is not installed: {exc}",
+            pytrace=False)
+else:
+    sync_api = pytest.importorskip(
+        "playwright.sync_api",
+        reason="playwright is not installed (uv add --dev playwright)",
+    )
 
 import httpx  # noqa: E402
 
@@ -93,6 +108,10 @@ def browser():
         try:
             instance = playwright.chromium.launch()
         except Exception as error:        # noqa: BLE001 — the message is the reason
+            if REQUIRE_BROWSER:
+                pytest.fail(
+                    "CI_REQUIRE_BROWSER is set but Chromium did not launch: "
+                    f"{error}", pytrace=False)
             pytest.skip(f"playwright's browser is not installed: {error}")
         yield instance
         instance.close()
