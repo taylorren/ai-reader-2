@@ -37,6 +37,12 @@ stats bar). They skip cleanly unless a browser is present:
 uv run playwright install chromium     # ~130 MB, once
 ```
 
+CI runs the same suite on every push and pull request
+(`.github/workflows/ci.yml`) with `CI_REQUIRE_BROWSER=1`, so a runner without
+Chromium fails instead of reporting 22 green skips. Its Docker job builds the
+image, mounts the library, and uploads a fixture through it — the deployment
+shape that found PITFALLS 2 — rather than only loading the library page.
+
 Static assets are read from disk on every request, but Python is loaded once at
 startup: after editing a router or a model, restart the server
 (`systemctl restart reader3`). A running process serving the new `panel.js`

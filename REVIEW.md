@@ -2176,9 +2176,10 @@ the stub can now model an insecure origin (`clipboard: false`) and a refused wri
 ## Second review — 2026-11-19
 
 A second pass over the repository, after every item in this file had been applied,
-found five issues. Three are fixed here, each with the test that pins it. Two are
-left open on purpose — they are feature work rather than repairs — and are
-recorded at the end so they are not lost.
+found five issues. Four are fixed here, each with the test that pins it — the
+fourth is `.github/workflows/ci.yml` below. The fifth, AI context/output budgets,
+is deliberately not fixed (see the end): it is a tail risk for this app's usage,
+not a defect waiting to bite.
 
 ### An upload could leave the shelf and the database disagreeing
 
@@ -2236,16 +2237,31 @@ commits once — both or neither — and `routers/highlights.highlight_fields` k
 the selection rules in one place for the bare-mark route and this one. Pinned by
 `tests/test_ai.py::test_a_failed_analysis_write_leaves_no_highlight`.
 
-### Still open
+### CI runs the suite and the container
 
-- **AI budgets.** Completion requests carry no `max_tokens`, and a discussion
-  sends the whole history every turn; the 15/20 warnings count *messages*, not
-  characters or tokens. A manual summarize exists, but it sends the full
-  transcript too, so it fails exactly when it is needed, and continuing after a
-  summary still sends the whole history. Needs an output limit, an input budget,
-  server-side history compression, and a chunked summary.
-- **CI.** There is still no worked-in workflow, though this file and `SPEC.md`
-  speak as if there is one. A workflow should install Chromium *and fail if the
-  browser tests skip*, and its Docker smoke must bind-mount `/app/books` — without
-  the mount the cross-device upload path (PITFALLS 2) is never exercised.
+`.github/workflows/ci.yml` runs on every push and pull request: uv installs the
+locked environment, Chromium is installed with the libraries it needs, and
+`uv run pytest -q -rs` runs the Python suite, the Node units (through
+`tests/test_frontend.py`) and the browser tests.
+
+Two details are the point of it. The browser tests skip cleanly when Chromium is
+missing — correct on a laptop, wrong on a runner, where 22 tests would report
+green without running; the workflow sets `CI_REQUIRE_BROWSER=1`, which turns both
+the missing-package and missing-browser skips into failures. And the Docker job
+does not merely load `/`: it builds the image, bind-mounts the library, uploads a
+fixture through the running container, and asserts the EPUB landed in the mounted
+directory with no `.part` left. That is the deployment shape that produced
+PITFALLS 2, and the upload is the step that only failed there.
+
+### Deliberately not done: AI context/output budgets
+
+The code has no `max_tokens` and no input budget, and a discussion sends its whole
+history every turn; the summarize endpoint does too, so it cannot rescue a
+transcript that has outgrown the model. That is real (the review's finding 4), but
+it needs a long discussion on a small-context model to matter, and this reader's
+usage is a paragraph and a few follow-ups. Recorded rather than built: if a
+provider ever answers with a context-length error, the 502 carries the reason, and
+that is the moment to add an output cap, caps on the selection and the typed
+message, and a chunked summary. Until then, building rolling summarisation would
+be speculative.
 
